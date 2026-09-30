@@ -3,7 +3,8 @@ name = "abm_crm"
 authors = [
     { name = "Aman Boora ", email = "aman.chaudharyboora@gmail.com"}
 ]
-description = "Custom CRM by ABM Tech"
+description = "Free, self-hosted sales CRM built on Frappe CRM: campaign lead routing, per-user email senders, WhatsApp"
+license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.14"
 readme = "README.md"
 dynamic = ["version"]

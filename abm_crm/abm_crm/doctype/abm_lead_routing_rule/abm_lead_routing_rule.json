@@ -1,0 +1,204 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:rule_name",
+ "creation": "2026-10-01 12:00:00.000000",
+ "description": "Assigns new leads to a set of users when the lead matches this rule's conditions",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "rule_name",
+  "enabled",
+  "column_break_a",
+  "priority",
+  "conditions_section",
+  "lead_source",
+  "lead_sync_source",
+  "facebook_lead_form",
+  "platform",
+  "column_break_b",
+  "campaign_match",
+  "campaign",
+  "adset",
+  "ad",
+  "territory",
+  "advanced_section",
+  "condition",
+  "assignment_section",
+  "strategy",
+  "fallback_user",
+  "users",
+  "status_section",
+  "last_user",
+  "assigned_count"
+ ],
+ "fields": [
+  {
+   "fieldname": "rule_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Rule Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "column_break_a",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "10",
+   "description": "Rules are checked from highest priority to lowest. The first matching rule assigns the lead.",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Priority"
+  },
+  {
+   "description": "Leave a condition empty to match any value. All filled conditions must match.",
+   "fieldname": "conditions_section",
+   "fieldtype": "Section Break",
+   "label": "Conditions"
+  },
+  {
+   "fieldname": "lead_source",
+   "fieldtype": "Link",
+   "label": "Lead Source",
+   "options": "CRM Lead Source"
+  },
+  {
+   "fieldname": "lead_sync_source",
+   "fieldtype": "Link",
+   "label": "Lead Sync Source",
+   "options": "Lead Sync Source"
+  },
+  {
+   "fieldname": "facebook_lead_form",
+   "fieldtype": "Link",
+   "label": "Facebook Lead Form",
+   "options": "Facebook Lead Form"
+  },
+  {
+   "fieldname": "platform",
+   "fieldtype": "Select",
+   "label": "Platform",
+   "options": "\nFacebook\nInstagram\nMessenger\nWhatsApp\nWebsite\nOther"
+  },
+  {
+   "fieldname": "column_break_b",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Contains",
+   "fieldname": "campaign_match",
+   "fieldtype": "Select",
+   "label": "Match Campaign / Ad Set / Ad By",
+   "options": "Contains\nEquals\nStarts With"
+  },
+  {
+   "description": "Campaign name or ID. Separate several values with commas; any of them matches.",
+   "fieldname": "campaign",
+   "fieldtype": "Small Text",
+   "label": "Campaign"
+  },
+  {
+   "fieldname": "adset",
+   "fieldtype": "Small Text",
+   "label": "Ad Set"
+  },
+  {
+   "fieldname": "ad",
+   "fieldtype": "Small Text",
+   "label": "Ad"
+  },
+  {
+   "fieldname": "territory",
+   "fieldtype": "Link",
+   "label": "Territory",
+   "options": "CRM Territory"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "advanced_section",
+   "fieldtype": "Section Break",
+   "label": "Advanced"
+  },
+  {
+   "description": "Optional Python expression on the lead, e.g. <code>doc.country == \"India\" and doc.no_of_employees in (\"51-200\", \"201-500\")</code>",
+   "fieldname": "condition",
+   "fieldtype": "Code",
+   "label": "Extra Condition",
+   "options": "Python"
+  },
+  {
+   "fieldname": "assignment_section",
+   "fieldtype": "Section Break",
+   "label": "Assign To"
+  },
+  {
+   "default": "Round Robin",
+   "fieldname": "strategy",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Strategy",
+   "options": "Round Robin\nLoad Balancing",
+   "reqd": 1
+  },
+  {
+   "description": "Used when every user is inactive or at their limit. Leave empty to fall through to the next rule.",
+   "fieldname": "fallback_user",
+   "fieldtype": "Link",
+   "label": "Fallback User",
+   "options": "User"
+  },
+  {
+   "fieldname": "users",
+   "fieldtype": "Table",
+   "label": "Users",
+   "options": "ABM Lead Routing User",
+   "reqd": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "fieldname": "last_user",
+   "fieldtype": "Link",
+   "label": "Last Assigned User",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "assigned_count",
+   "fieldtype": "Int",
+   "label": "Leads Assigned",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-10-01 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Abm Crm",
+ "name": "ABM Lead Routing Rule",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {"create": 1, "delete": 1, "read": 1, "role": "System Manager", "write": 1},
+  {"create": 1, "delete": 1, "read": 1, "role": "Sales Manager", "write": 1}
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "priority",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

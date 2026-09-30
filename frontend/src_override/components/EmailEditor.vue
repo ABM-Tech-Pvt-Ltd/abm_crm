@@ -1,0 +1,388 @@
+<template>
+  <Editor
+    ref="textEditor"
+    v-model="content"
+    :extensions="extensions"
+    :placeholder="placeholder"
+    :editable="editable"
+    :upload-function="(file) => uploadFile(file, doctype, modelValue.name)"
+  >
+    <div class="relative w-full">
+      <div class="flex flex-col gap-3">
+        <div
+          v-if="from.length"
+          class="mx-4 flex items-center gap-2 border-t pt-2.5 h-10"
+        >
+          <span class="text-xs text-ink-gray-4">{{ __('FROM') }}:</span>
+          <FormControl
+            v-model="fromEmail"
+            type="select"
+            variant="ghost"
+            class="w-full"
+            :placeholder="__('')"
+            :options="from"
+          />
+        </div>
+        <div
+          v-else-if="senderOptions.fetched && isManager()"
+          class="mx-4 flex items-center gap-2 border-t pt-2.5 text-xs text-ink-gray-5"
+        >
+          <span>{{ __('FROM') }}:</span>
+          <span>{{ __('No sender set up.') }}</span>
+          <button
+            class="underline hover:text-ink-gray-8"
+            @click="openSenderSettings"
+          >
+            {{ __('Set up senders') }}
+          </button>
+        </div>
+        <div
+          class="mx-4 flex items-center gap-2"
+          :class="from.length || (senderOptions.fetched && isManager()) ? '' : 'border-t pt-2.5'"
+        >
+          <span class="text-xs text-ink-gray-4 mr-2">{{ __('TO') }}:</span>
+          <MultiSelectEmailInput
+            v-model="toEmails"
+            class="flex-1"
+            variant="ghost"
+            :validate="validateEmail"
+            :error-message="
+              (value) => __('{0} is an invalid email address', [value])
+            "
+          />
+          <div class="flex gap-1.5">
+            <Button
+              :label="__('CC')"
+              variant="ghost"
+              :class="[
+                cc
+                  ? '!bg-surface-gray-4 hover:bg-surface-gray-3'
+                  : '!text-ink-gray-4',
+              ]"
+              @click="toggleCC()"
+            />
+            <Button
+              :label="__('BCC')"
+              variant="ghost"
+              :class="[
+                bcc
+                  ? '!bg-surface-gray-4 hover:bg-surface-gray-3'
+                  : '!text-ink-gray-4',
+              ]"
+              @click="toggleBCC()"
+            />
+          </div>
+        </div>
+        <div v-if="cc" class="mx-4 flex items-center gap-2">
+          <span class="text-xs text-ink-gray-4">{{ __('CC') }}:</span>
+          <MultiSelectEmailInput
+            ref="ccInput"
+            v-model="ccEmails"
+            class="flex-1"
+            variant="ghost"
+            :fetchContacts="true"
+            :validate="validateEmail"
+            :error-message="
+              (value) => __('{0} is an invalid email address', [value])
+            "
+          />
+        </div>
+        <div v-if="bcc" class="mx-4 flex items-center gap-2">
+          <span class="text-xs text-ink-gray-4">{{ __('BCC') }}:</span>
+          <MultiSelectEmailInput
+            ref="bccInput"
+            v-model="bccEmails"
+            class="flex-1"
+            variant="ghost"
+            :fetchContacts="true"
+            :validate="validateEmail"
+            :error-message="
+              (value) => __('{0} is an invalid email address', [value])
+            "
+          />
+        </div>
+        <div class="mx-4 flex items-center gap-2 pb-2.5">
+          <span class="text-xs text-ink-gray-4">{{ __('SUBJECT') }}:</span>
+          <input
+            v-model="subject"
+            class="flex-1 border-none text-ink-gray-9 text-base bg-surface-base hover:bg-surface-base focus:border-none focus:!shadow-none focus-visible:!ring-0"
+          />
+        </div>
+      </div>
+      <EditorContent
+        :class="[
+          'prose-sm max-w-none [&_p.reply-to-content]:hidden',
+          editable && 'mx-4 max-h-[35vh] overflow-y-auto border-t py-3',
+        ]"
+      />
+      <EditorTableMenu />
+      <div v-if="editable" class="flex flex-col gap-2">
+        <div class="flex flex-wrap gap-2 px-4">
+          <AttachmentItem
+            v-for="a in attachments"
+            :key="a.file_url"
+            :label="a.file_name"
+          >
+            <template #suffix>
+              <span
+                class="lucide-x h-3.5"
+                aria-hidden="true"
+                @click.stop="removeAttachment(a)"
+              />
+            </template>
+          </AttachmentItem>
+        </div>
+        <div
+          class="flex justify-between gap-2 overflow-hidden border-t px-4 py-2.5"
+        >
+          <div class="flex gap-1 items-center overflow-x-auto">
+            <Button
+              :tooltip="__('Insert Email Template')"
+              variant="ghost"
+              :icon="EmailTemplateIcon"
+              @click="showEmailTemplateSelectorModal = true"
+            />
+            <FileUploader
+              :upload-args="{
+                doctype: doctype,
+                docname: modelValue.name,
+                private: true,
+              }"
+              @success="(f) => attachments.push(f)"
+            >
+              <template #default="{ openFileSelector }">
+                <Button
+                  :tooltip="__('Attach a File')"
+                  :icon="AttachmentIcon"
+                  variant="ghost"
+                  @click="openFileSelector()"
+                />
+              </template>
+            </FileUploader>
+            <EditorFixedMenu :items="fullToolbar" />
+            <IconPicker
+              v-slot="{ togglePopover }"
+              v-model="emoji"
+              @update:modelValue="() => appendEmoji()"
+            >
+              <Button
+                :tooltip="__('Insert Emoji')"
+                :icon="SmileIcon"
+                variant="ghost"
+                @click="togglePopover()"
+              />
+            </IconPicker>
+          </div>
+          <div class="mt-2 flex items-center justify-end space-x-2 sm:mt-0">
+            <Button v-bind="discardButtonProps || {}" :label="__('Discard')" />
+            <Button
+              variant="solid"
+              v-bind="submitButtonProps || {}"
+              :label="`${__('Send')} (${submitShortcutLabel})`"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  </Editor>
+  <EmailTemplateSelectorModal
+    v-model="showEmailTemplateSelectorModal"
+    :doctype="doctype"
+    @apply="applyEmailTemplate"
+  />
+</template>
+
+<script setup>
+import IconPicker from '@/components/IconPicker.vue'
+import SmileIcon from '@/components/Icons/SmileIcon.vue'
+import EmailTemplateIcon from '@/components/Icons/EmailTemplateIcon.vue'
+import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
+import AttachmentItem from '@/components/AttachmentItem.vue'
+import MultiSelectEmailInput from '@/components/Controls/MultiSelectEmailInput.vue'
+import EmailTemplateSelectorModal from '@/components/Modals/EmailTemplateSelectorModal.vue'
+import {
+  buildEditorExtensions,
+  fullToolbar,
+  uploadFile,
+} from '@/components/editor/config'
+import { FileUploader, call, createResource, FormControl } from 'frappe-ui'
+import {
+  Editor,
+  EditorContent,
+  EditorFixedMenu,
+  EditorTableMenu,
+} from 'frappe-ui/editor'
+import { useTelemetry } from 'frappe-ui/frappe'
+import { validateEmail, submitShortcutLabel } from '@/utils'
+import { usersStore } from '@/stores/users'
+import { showSettings, activeSettingsPage } from '@/composables/settings'
+import Paragraph from '@tiptap/extension-paragraph'
+import { ref, computed, nextTick, watch } from 'vue'
+
+const props = defineProps({
+  placeholder: { type: String, default: null },
+  editable: { type: Boolean, default: true },
+  doctype: { type: String, default: 'CRM Lead' },
+  subject: { type: String, default: __('Email From Lead') },
+  editorProps: { type: Object, default: () => ({}) },
+  submitButtonProps: { type: Object, default: () => ({}) },
+  discardButtonProps: { type: Object, default: () => ({}) },
+})
+
+const CustomParagraph = Paragraph.extend({
+  addAttributes() {
+    return {
+      class: {
+        default: null,
+        renderHTML: (attributes) => {
+          if (!attributes.class) {
+            return {}
+          }
+          return {
+            class: `${attributes.class}`,
+          }
+        },
+      },
+    }
+  },
+})
+
+const modelValue = defineModel({ type: Object })
+const attachments = defineModel('attachments', {
+  type: Array,
+  default: () => [],
+})
+const content = defineModel('content', { type: String, default: '' })
+
+const { capture } = useTelemetry()
+// abm_crm: sender options come from abm_crm.api.email.get_sender_options (per user/role rules)
+// instead of the User doc's user_emails table, which sales users cannot read (permlevel 1).
+const senderOptions = createResource({
+  url: 'abm_crm.api.email.get_sender_options',
+  cache: 'abm_crm_sender_options',
+  auto: true,
+})
+
+const textEditor = ref(null)
+const cc = ref(false)
+const bcc = ref(false)
+const emoji = ref('')
+
+const subject = ref(props.subject)
+const fromEmail = ref('')
+const toEmails = ref(modelValue.value.email ? [modelValue.value.email] : [])
+const ccEmails = ref([])
+const bccEmails = ref([])
+const ccInput = ref(null)
+const bccInput = ref(null)
+
+const extensions = buildEditorExtensions({
+  starterKit: { paragraph: false },
+  extra: [CustomParagraph],
+})
+
+const { isManager } = usersStore()
+
+function openSenderSettings() {
+  activeSettingsPage.value = __('Senders')
+  showSettings.value = true
+}
+
+const from = computed(() => {
+  // shown even with one option so users can see which address the email goes out from
+  return (senderOptions.data || []).map((o) => ({
+    label: o.label,
+    value: o.value,
+  }))
+})
+
+const defaultSender = computed(
+  () => (senderOptions.data || []).find((o) => o.is_default)?.value,
+)
+
+const replyAddresses = ref([])
+
+watch(
+  [from, replyAddresses, defaultSender],
+  ([fromOptions, addresses]) => {
+    let match = addresses.find((a) => fromOptions.some((f) => f.value === a))
+    if (match) {
+      fromEmail.value = match
+      replyAddresses.value = []
+    } else if (!fromOptions.find((f) => f.value === fromEmail.value)) {
+      fromEmail.value = fromOptions.length
+        ? defaultSender.value || fromOptions[0].value
+        : defaultSender.value || ''
+    }
+  },
+  { immediate: true },
+)
+
+const editor = computed(() => textEditor.value?.editor)
+
+function removeAttachment(attachment) {
+  attachments.value = attachments.value.filter((a) => a !== attachment)
+}
+
+const showEmailTemplateSelectorModal = ref(false)
+
+async function applyEmailTemplate(template) {
+  let doc = modelValue.value
+
+  let data = await call(
+    'frappe.email.doctype.email_template.email_template.get_email_template',
+    {
+      template_name: template.name,
+      // fields are the template context, so nesting doc lets {{ doc.field }} work too
+      doc: { ...doc, doc },
+    },
+  )
+
+  if (data.subject) {
+    subject.value = data.subject
+  }
+
+  if (data.message) {
+    content.value = data.message
+  }
+  showEmailTemplateSelectorModal.value = false
+  capture('email_template_applied', { doctype: props.doctype })
+}
+
+function appendEmoji() {
+  editor.value.commands.insertContent(emoji.value)
+  editor.value.commands.focus()
+  emoji.value = ''
+  capture('emoji_inserted_in_email', { emoji: emoji.value })
+}
+
+// Callable from outside (e.g. the command palette); setting the exposed ref
+// from a parent doesn't write through to .value, so open via a method.
+function openTemplateSelector() {
+  showEmailTemplateSelectorModal.value = true
+}
+
+function toggleCC() {
+  cc.value = !cc.value
+  if (cc.value) nextTick(() => ccInput.value.setFocus())
+}
+
+function toggleBCC() {
+  bcc.value = !bcc.value
+  if (bcc.value) nextTick(() => bccInput.value.setFocus())
+}
+
+defineExpose({
+  editor,
+  showEmailTemplateSelectorModal,
+  openTemplateSelector,
+  subject,
+  cc,
+  bcc,
+  fromEmail,
+  replyAddresses,
+  toEmails,
+  ccEmails,
+  bccEmails,
+})
+</script>

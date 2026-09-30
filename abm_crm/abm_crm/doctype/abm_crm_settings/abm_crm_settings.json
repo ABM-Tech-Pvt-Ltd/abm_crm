@@ -1,0 +1,81 @@
+{
+ "actions": [],
+ "creation": "2026-10-01 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "email_section",
+  "enforce_sender_rules",
+  "include_user_email_accounts",
+  "include_default_outgoing",
+  "phone_section",
+  "default_phone_region"
+ ],
+ "fields": [
+  {
+   "fieldname": "email_section",
+   "fieldtype": "Section Break",
+   "label": "Email Sender"
+  },
+  {
+   "default": "0",
+   "description": "Block CRM emails sent from an address the user is not allowed to use (ABM Email Sender, User Emails or default outgoing account). System Managers are exempt.",
+   "fieldname": "enforce_sender_rules",
+   "fieldtype": "Check",
+   "label": "Enforce Sender Rules"
+  },
+  {
+   "default": "1",
+   "description": "Also offer the accounts listed in the user's own User Emails table",
+   "fieldname": "include_user_email_accounts",
+   "fieldtype": "Check",
+   "label": "Include User's Email Accounts"
+  },
+  {
+   "default": "1",
+   "description": "Also offer the site's default outgoing Email Account",
+   "fieldname": "include_default_outgoing",
+   "fieldtype": "Check",
+   "label": "Include Default Outgoing Account"
+  },
+  {
+   "fieldname": "phone_section",
+   "fieldtype": "Section Break",
+   "label": "Phone Numbers"
+  },
+  {
+   "default": "IN",
+   "description": "Two-letter country code (ISO 3166) used for numbers saved without a country code, e.g. IN for India. 9876543210 becomes +91 98765 43210.",
+   "fieldname": "default_phone_region",
+   "fieldtype": "Data",
+   "label": "Default Phone Region",
+   "length": 2
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-01 14:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Abm Crm",
+ "name": "ABM CRM Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Sales Manager",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

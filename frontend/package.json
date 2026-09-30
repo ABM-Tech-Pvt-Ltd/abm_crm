@@ -1,0 +1,11 @@
+{
+  "name": "abm-crm-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Frappe CRM frontend with abm_crm overrides. Uses apps/crm/frontend/node_modules; no dependencies of its own.",
+  "scripts": {
+    "dev": "node ../../crm/frontend/node_modules/vite/bin/vite.js --config vite.config.js",
+    "build": "node ../../crm/frontend/node_modules/vite/bin/vite.js build --config vite.config.js"
+  }
+}

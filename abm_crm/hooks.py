@@ -3,256 +3,78 @@ app_title = "Abm Crm"
 app_publisher = "Aman Boora "
 app_description = "Custom CRM by ABM Tech"
 app_email = "aman.chaudharyboora@gmail.com"
-app_license = "mit"
+app_license = "agpl-3.0"
 
 # Apps
 # ------------------
 
-# required_apps = []
-
-# Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "abm_crm",
-# 		"logo": "/assets/abm_crm/logo.png",
-# 		"title": "Abm Crm",
-# 		"route": "/abm_crm",
-# 		"has_permission": "abm_crm.api.permission.has_app_permission"
-# 	}
-# ]
-
-# Includes in <head>
-# ------------------
-
-# include js, css files in header of desk.html
-# app_include_css = "/assets/abm_crm/css/abm_crm.css"
-# app_include_js = "/assets/abm_crm/js/abm_crm.js"
-
-# include js, css files in header of web template
-# web_include_css = "/assets/abm_crm/css/abm_crm.css"
-# web_include_js = "/assets/abm_crm/js/abm_crm.js"
-
-# include custom scss in every website theme (without file extension ".scss")
-# website_theme_scss = "abm_crm/public/scss/website"
-
-# include js, css files in header of web form
-# webform_include_js = {"doctype": "public/js/doctype.js"}
-# webform_include_css = {"doctype": "public/css/doctype.css"}
-
-# include js in page
-# page_js = {"page" : "public/js/file.js"}
-
-# include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
-# doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
-# doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
-
-# Svg Icons
-# ------------------
-# include app icons in desk
-# app_include_icons = "abm_crm/public/icons.svg"
-
-# Home Pages
-# ----------
-
-# application home page (will override Website Settings)
-# home_page = "login"
-
-# website user home page (by Role)
-# role_home_page = {
-# 	"Role": "home_page"
-# }
-
-# Generators
-# ----------
-
-# automatically create page for each record of this doctype
-# website_generators = ["Web Page"]
-
-# automatically load and sync documents of this doctype from downstream apps
-# importable_doctypes = [doctype_1]
-
-# Jinja
-# ----------
-
-# add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "abm_crm.utils.jinja_methods",
-# 	"filters": "abm_crm.utils.jinja_filters"
-# }
+# abm_crm layers on top of Frappe CRM. It must be installed after crm so that
+# abm_crm/www/crm.html shadows crm's page (Frappe searches installed apps in reverse order).
+# Do not install crm_override on the same site: both apps claim the /crm route.
+required_apps = ["crm"]
 
 # Installation
 # ------------
 
-# before_install = "abm_crm.install.before_install"
-# after_install = "abm_crm.install.after_install"
-
-# Uninstallation
-# ------------
-
-# before_uninstall = "abm_crm.uninstall.before_uninstall"
-# after_uninstall = "abm_crm.uninstall.after_uninstall"
-
-# Integration Setup
-# ------------------
-# To set up dependencies/integrations with other apps
-# Name of the app being installed is passed as an argument
-
-# before_app_install = "abm_crm.utils.before_app_install"
-# after_app_install = "abm_crm.utils.after_app_install"
-
-# Integration Cleanup
-# -------------------
-# To clean up dependencies/integrations with other apps
-# Name of the app being uninstalled is passed as an argument
-
-# before_app_uninstall = "abm_crm.utils.before_app_uninstall"
-# after_app_uninstall = "abm_crm.utils.after_app_uninstall"
-
-# Build
-# ------------------
-# To hook into the build process
-
-# after_build = "abm_crm.build.after_build"
-
-# Desk Notifications
-# ------------------
-# See frappe.core.notifications.get_notification_config
-
-# notification_config = "abm_crm.notifications.get_notification_config"
-
-# Permissions
-# -----------
-# Permissions evaluated in scripted ways
-
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
+after_install = "abm_crm.setup.install.after_install"
+after_migrate = "abm_crm.setup.install.after_migrate"
 
 # Document Events
 # ---------------
-# Hook on document methods and events
+# These run in addition to crm's own handlers.
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"Communication": {
+		"before_insert": "abm_crm.api.email.validate_outgoing_sender",
+	},
+	"Email Account": {
+		# before_validate: Email Account.validate() tests the login, so clean the password first
+		"before_validate": "abm_crm.api.email_account.clean_account_password",
+	},
+	"CRM Lead": {
+		"before_insert": "abm_crm.lead_routing.before_insert_lead",
+	},
+	"CRM Deal": {
+		"before_insert": "abm_crm.lead_routing.before_insert_deal",
+	},
+}
+
+# Fixtures
+# --------
+# Only export records that belong to this app's module. Custom fields are created in code
+# (abm_crm/setup/install.py), so they are not exported here.
+
+fixtures = [
+	{"dt": "Property Setter", "filters": [["module", "=", "Abm Crm"]]},
+	{"dt": "Client Script", "filters": [["module", "=", "Abm Crm"]]},
+	{"dt": "Server Script", "filters": [["module", "=", "Abm Crm"]]},
+]
 
 # Scheduled Tasks
 # ---------------
 
 # scheduler_events = {
-# 	"all": [
-# 		"abm_crm.tasks.all"
-# 	],
-# 	"daily": [
-# 		"abm_crm.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"abm_crm.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"abm_crm.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"abm_crm.tasks.monthly"
-# 	],
-# }
-
-# Testing
-# -------
-
-# before_tests = "abm_crm.install.before_tests"
-
-# Extend DocType Class
-# ------------------------------
-#
-# Specify custom mixins to extend the standard doctype controller.
-# extend_doctype_class = {
-# 	"Task": "abm_crm.custom.task.CustomTaskMixin"
+# 	"cron": {
+# 		"0 9 * * *": ["abm_crm.tasks.daily_digest.send"],
+# 	},
 # }
 
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "abm_crm.event.get_events"
-# }
+override_whitelisted_methods = {
+	# tests only what is enabled and returns the real error (see abm_crm/api/email_account.py)
+	"crm.api.settings.create_email_account": "abm_crm.api.email_account.create_email_account",
+	# send to the full international number and explain Meta's errors (see abm_crm/api/whatsapp.py)
+	"crm.api.whatsapp.create_whatsapp_message": "abm_crm.api.whatsapp.create_whatsapp_message",
+	"crm.api.whatsapp.send_whatsapp_template": "abm_crm.api.whatsapp.send_whatsapp_template",
+}
+
+# Extend DocType Class
+# ------------------------------
+# Prefer extend_doctype_class over override_doctype_class: it adds a mixin instead of
+# replacing crm's class.
 #
-# each overriding function accepts a `data` argument;
-# generated from the base implementation of the doctype dashboard,
-# along with any modifications made in other Frappe apps
-# override_doctype_dashboards = {
-# 	"Task": "abm_crm.task.get_dashboard_data"
+# extend_doctype_class = {
+# 	"CRM Lead": "abm_crm.overrides.crm_lead.CRMLeadMixin",
 # }
-
-# exempt linked doctypes from being automatically cancelled
-#
-# auto_cancel_exempted_doctypes = ["Auto Repeat"]
-
-# Ignore links to specified DocTypes when deleting documents
-# -----------------------------------------------------------
-
-# ignore_links_on_delete = ["Communication", "ToDo"]
-
-# Request Events
-# ----------------
-# before_request = ["abm_crm.utils.before_request"]
-# after_request = ["abm_crm.utils.after_request"]
-
-# Job Events
-# ----------
-# before_job = ["abm_crm.utils.before_job"]
-# after_job = ["abm_crm.utils.after_job"]
-
-# User Data Protection
-# --------------------
-
-# user_data_fields = [
-# 	{
-# 		"doctype": "{doctype_1}",
-# 		"filter_by": "{filter_by}",
-# 		"redact_fields": ["{field_1}", "{field_2}"],
-# 		"partial": 1,
-# 	},
-# 	{
-# 		"doctype": "{doctype_2}",
-# 		"filter_by": "{filter_by}",
-# 		"partial": 1,
-# 	},
-# 	{
-# 		"doctype": "{doctype_3}",
-# 		"strict": False,
-# 	},
-# 	{
-# 		"doctype": "{doctype_4}"
-# 	}
-# ]
-
-# Authentication and authorization
-# --------------------------------
-
-# auth_hooks = [
-# 	"abm_crm.auth.validate"
-# ]
-
-# Automatically update python controller files with type annotations for this app.
-# export_python_type_annotations = True
-
-# default_log_clearing_doctypes = {
-# 	"Logging DocType Name": 30  # days to retain logs
-# }
-
-# Translation
-# ------------
-# List of apps whose translatable strings should be excluded from this app's translations.
-# ignore_translatable_strings_from = []
-
