@@ -86,17 +86,6 @@ const actions = computed(() => {
       disabled: !data.wa_number,
       class: 'bg-[#25D366] text-white',
     },
-    {
-      label: __('Email'),
-      icon: Email2Icon,
-      href: '#',
-      disabled: !data.email,
-      class: 'bg-surface-gray-2 text-ink-gray-8',
-      onClick: (e) => {
-        e.preventDefault()
-        emit('email')
-      },
-    },
   ]
 })
 </script>
