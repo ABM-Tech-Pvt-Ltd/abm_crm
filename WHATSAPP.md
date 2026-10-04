@@ -1,5 +1,25 @@
 # WhatsApp in ABM CRM
 
+ABM CRM has two WhatsApp modes. Switch between them in Settings → WhatsApp Templates.
+
+| | Click to Chat (default) | Cloud API |
+|---|---|---|
+| Cost | Free | Template messages charged by Meta |
+| Needs | Nothing; the rep's WhatsApp app or WhatsApp Web | Meta app + WhatsApp Business number, `frappe_whatsapp` |
+| Sending | Opens WhatsApp with the message typed in, the rep presses send | Sent from inside the CRM |
+| Replies | Stay in the rep's WhatsApp | Show up in the CRM |
+| Templates | ABM WhatsApp Templates (any text, Jinja) | Meta-approved templates |
+
+**Click to Chat:** the lead/deal WhatsApp tab shows your templates with the lead's details filled in.
+Tap one, edit it, then tap **Open in WhatsApp**. Each message is logged on the record (ABM WhatsApp Log)
+and in its activity feed. The WhatsApp button on leads, deals and mobile list rows opens the chat directly.
+
+Unofficial tools that link a personal WhatsApp through WhatsApp Web (Baileys, whatsmeow, WAHA and
+similar) can also send and receive for free. They break WhatsApp's terms of service, and numbers that
+use them can be banned, so ABM CRM does not use them.
+
+The rest of this guide covers the **Cloud API** mode.
+
 CRM's WhatsApp tab (on leads and deals) uses the [frappe_whatsapp](https://github.com/shridarpatil/frappe_whatsapp)
 app, which talks directly to Meta's **WhatsApp Cloud API**. There is no third-party provider in between.
 

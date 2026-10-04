@@ -7,17 +7,61 @@ SETTINGS_DEFAULTS = {
 	"include_user_email_accounts": 1,
 	"include_default_outgoing": 1,
 	"default_phone_region": "IN",
+	"whatsapp_mode": "Click to Chat",
 }
 
 
 def after_install():
 	setup_custom_fields()
 	setup_settings_defaults()
+	setup_whatsapp_templates()
 
 
 def after_migrate():
 	setup_custom_fields()
 	setup_settings_defaults()
+	setup_whatsapp_templates()
+
+
+DEFAULT_WHATSAPP_TEMPLATES = [
+	(
+		"Introduction",
+		"Hi {{ doc.first_name or '' }}, this is {{ user.first_name }}{% if brand %} from {{ brand }}{% endif %}. "
+		"Thanks for your interest! When is a good time for a quick call?",
+	),
+	(
+		"Missed your call",
+		"Hi {{ doc.first_name or '' }}, I tried calling you just now. Please let me know a convenient time to talk.",
+	),
+	(
+		"Follow-up",
+		"Hi {{ doc.first_name or '' }}, just following up on our conversation. Do you have any questions I can help with?",
+	),
+	(
+		"Share details",
+		"Hi {{ doc.first_name or '' }}, as discussed, here are the details: ",
+	),
+	(
+		"Meeting reminder",
+		"Hi {{ doc.first_name or '' }}, a quick reminder about our meeting. Looking forward to speaking with you.",
+	),
+]
+
+
+def setup_whatsapp_templates():
+	"""Add a few starter templates the first time. Never touches templates that already exist."""
+	if frappe.db.count("ABM WhatsApp Template"):
+		return
+	for i, (name, message) in enumerate(DEFAULT_WHATSAPP_TEMPLATES):
+		frappe.get_doc(
+			{
+				"doctype": "ABM WhatsApp Template",
+				"template_name": name,
+				"message": message,
+				"applies_to": "Both",
+				"sort_order": i,
+			}
+		).insert(ignore_permissions=True)
 
 
 def setup_settings_defaults():

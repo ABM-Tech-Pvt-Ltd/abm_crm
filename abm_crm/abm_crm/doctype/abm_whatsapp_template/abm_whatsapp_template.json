@@ -1,0 +1,86 @@
+{
+ "actions": [],
+ "creation": "2026-10-04 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "template_name",
+  "enabled",
+  "applies_to",
+  "message",
+  "sort_order"
+ ],
+ "fields": [
+  {
+   "fieldname": "template_name",
+   "fieldtype": "Data",
+   "label": "Template Name",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "in_list_view": 1
+  },
+  {
+   "default": "Both",
+   "fieldname": "applies_to",
+   "fieldtype": "Select",
+   "label": "Show On",
+   "options": "Both\nCRM Lead\nCRM Deal",
+   "in_list_view": 1
+  },
+  {
+   "description": "Jinja is supported, e.g. Hi {{ doc.first_name }}, this is {{ user.first_name }} from {{ brand }}.",
+   "fieldname": "message",
+   "fieldtype": "Text",
+   "label": "Message",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Templates are shown from lowest to highest",
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Sort Order"
+  }
+ ],
+ "links": [],
+ "modified": "2026-10-04 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Abm Crm",
+ "name": "ABM WhatsApp Template",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "write": 1,
+   "role": "System Manager"
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "write": 1,
+   "role": "Sales Manager"
+  },
+  {
+   "read": 1,
+   "role": "Sales User"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "sort_order",
+ "sort_order": "ASC",
+ "states": [],
+ "autoname": "field:template_name",
+ "naming_rule": "By fieldname",
+ "allow_rename": 1,
+ "description": "Predefined messages for Click to Chat WhatsApp"
+}

@@ -46,7 +46,20 @@ ABM CRM is an add-on app. It never edits Frappe CRM's code, so you keep getting 
 - The email account setup shows the real reason a connection fails, e.g. "Gmail needs an App
   Password", instead of a generic "invalid credentials". It only tests incoming mail when incoming is on.
 
-**WhatsApp** (with [frappe_whatsapp](https://github.com/shridarpatil/frappe_whatsapp) and Meta's Cloud API)
+**Call and WhatsApp in one tap**
+- **Call / WhatsApp / Email** buttons on every lead and deal, and call/WhatsApp buttons on every row of
+  the mobile lists. Call opens the phone dialer; WhatsApp opens the chat.
+- **Free WhatsApp (Click to Chat)**: the WhatsApp tab lists predefined templates (with the lead's
+  name filled in). Tap one, edit it, and "Open in WhatsApp" opens the rep's own WhatsApp app or
+  WhatsApp Web with the message typed in. No Meta account, no per-message cost. Every message is
+  logged on the lead. Templates are managed in Settings > WhatsApp Templates.
+
+**Made for phones**
+- **Bottom navigation**: Leads, Deals, Tasks, Alerts, and More for everything else.
+- **Card lists** for leads and deals instead of tables that scroll sideways.
+- A Call / WhatsApp / Email bar at the top of every lead and deal.
+
+**WhatsApp Cloud API** (optional, with [frappe_whatsapp](https://github.com/shridarpatil/frappe_whatsapp) and Meta's Cloud API)
 - Numbers saved without a country code (`9876543210`) are sent in international format (`919876543210`).
 - Meta errors in plain words: number not on the test allowed list, 24-hour window closed, expired
   token, and more.
@@ -107,7 +120,8 @@ must be on); your normal password is always rejected. **Outlook / Office 365** m
 set up from desk.
 
 ### WhatsApp
-See [WHATSAPP.md](WHATSAPP.md): creating the Meta app, free test number, tokens, webhook with a free
+Free by default (**Click to Chat**). Edit the templates in Settings → **WhatsApp Templates**, where you
+can also switch to the Cloud API. For the Cloud API, see [WHATSAPP.md](WHATSAPP.md): creating the Meta app, free test number, tokens, webhook with a free
 tunnel, costs, and common errors.
 
 ### Phone numbers
@@ -142,8 +156,15 @@ apps/abm_crm/
   - `components/EmailEditor.vue` (sender picker)
   - `components/Settings/Settings.vue` (adds Senders and Lead Routing)
   - `components/Settings/EmailAdd.vue` and `EmailEdit.vue` (real errors)
-  - `composables/whatsapp.js` (refreshes status)
-- **New pages:** `components/Settings/EmailSenders.vue`, `components/Settings/LeadRouting.vue`.
+  - `composables/whatsapp.js` (WhatsApp mode, refreshes status)
+  - `pages/Lead.vue`, `Deal.vue`, `MobileLead.vue`, `MobileDeal.vue` (call/WhatsApp/email buttons)
+  - `components/Activities/Activities.vue` and `ActivityHeader.vue` (Click to Chat tab)
+  - `components/ListViews/LeadsListView.vue` and `DealsListView.vue` (cards on phones)
+  - `components/Layouts/MobileLayout.vue` and `components/Mobile/MobileAppHeader.vue` (bottom navigation)
+- **New components:**
+  - `components/Settings/EmailSenders.vue`, `LeadRouting.vue`, `WhatsAppTemplates.vue`
+  - `components/ABM/` (`ContactActions`, `QuickWhatsApp`, `MobileRecordCards`)
+  - `components/Mobile/MobileBottomNav.vue`
 
 ### Frontend development
 

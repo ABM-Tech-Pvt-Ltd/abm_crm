@@ -9,7 +9,9 @@
   "include_user_email_accounts",
   "include_default_outgoing",
   "phone_section",
-  "default_phone_region"
+  "default_phone_region",
+  "whatsapp_section",
+  "whatsapp_mode"
  ],
  "fields": [
   {
@@ -50,11 +52,24 @@
    "fieldtype": "Data",
    "label": "Default Phone Region",
    "length": 2
+  },
+  {
+   "fieldname": "whatsapp_section",
+   "fieldtype": "Section Break",
+   "label": "WhatsApp"
+  },
+  {
+   "default": "Click to Chat",
+   "description": "Click to Chat is free: buttons open the rep's own WhatsApp (app or WhatsApp Web) with the message typed in. Cloud API sends from inside the CRM and needs a Meta WhatsApp Business account (frappe_whatsapp app).",
+   "fieldname": "whatsapp_mode",
+   "fieldtype": "Select",
+   "label": "WhatsApp Mode",
+   "options": "Click to Chat\nCloud API"
   }
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-10-01 14:00:00.000000",
+ "modified": "2026-10-04 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Abm Crm",
  "name": "ABM CRM Settings",

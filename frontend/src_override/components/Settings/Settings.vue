@@ -87,6 +87,8 @@ import LucideAtSign from '~icons/lucide/at-sign'
 // abm_crm: campaign-based lead routing page
 import LeadRouting from '@/components/Settings/LeadRouting.vue'
 import LucideRoute from '~icons/lucide/route'
+// abm_crm: Click to Chat WhatsApp templates
+import WhatsAppTemplates from '@/components/Settings/WhatsAppTemplates.vue'
 import Icon from '@/components/Icon.vue'
 import { usersStore } from '@/stores/users'
 import {
@@ -198,6 +200,17 @@ const tabs = computed(() => {
           component: markRaw(EmailTemplatePage),
         },
       ],
+    },
+    {
+      label: __('WhatsApp'),
+      items: [
+        {
+          label: __('WhatsApp Templates'),
+          icon: WhatsAppIcon,
+          component: markRaw(WhatsAppTemplates),
+        },
+      ],
+      condition: () => isManager(),
     },
     {
       label: __('Automation & Rules'),

@@ -70,9 +70,11 @@ widen it. To widen (e.g. territory managers), use DocShare.
 crm switches to Mobile* pages below 768px, but list views are desktop tables that scroll sideways,
 kanban drag is poor on touch, and there are no tap-to-call / WhatsApp links.
 
-- [ ] Tap-to-call (`tel:`), WhatsApp (`wa.me`) and directions buttons in `MobileLead.vue` /
-  `MobileDeal.vue` headers and list rows.
-- [ ] Card list for Leads and Deals on mobile instead of the table.
+- [x] Tap-to-call (`tel:`) and WhatsApp (`wa.me`) buttons on lead/deal pages and mobile list rows.
+- [x] Card list for Leads and Deals on mobile instead of the table.
+- [x] Bottom navigation on mobile.
+- [x] Free Click to Chat WhatsApp with predefined templates and logging.
+- [ ] Card list for Tasks, Contacts and Organizations on mobile; directions button for addresses.
 - [ ] "Today" agenda page: tasks, reminders and overdue follow-ups.
 - [ ] Log call outcome after a `tel:` call (writes `CRM Call Log`, asks for next follow-up).
 - [ ] Web push notifications for reminders and new assignments.
