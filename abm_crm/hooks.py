@@ -36,6 +36,12 @@ doc_events = {
 	},
 	"CRM Deal": {
 		"before_insert": "abm_crm.lead_routing.before_insert_deal",
+		# a deal converted from a lead keeps the lead's tags
+		"after_insert": "abm_crm.api.tags.copy_lead_tags",
+	},
+	"CRM Notification": {
+		# push to the mobile app (crm also creates these for lead/deal/task assignments)
+		"after_insert": "abm_crm.push.on_crm_notification",
 	},
 }
 

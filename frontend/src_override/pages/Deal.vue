@@ -136,6 +136,8 @@
           </div>
         </div>
       </div>
+      <!-- abm_crm: tags + "Talk as <Builder>" -->
+      <RecordTags doctype="CRM Deal" :docname="dealId" />
       <SLASection
         v-if="doc.sla_status"
         v-model="doc"
@@ -391,6 +393,8 @@ import { getMeta } from '@/stores/meta'
 import { useDocument } from '@/data/document'
 import { whatsappTabVisible } from '@/composables/whatsapp'
 import ContactActions from '@/components/ABM/ContactActions.vue'
+// abm_crm: record tags
+import RecordTags from '@/components/ABM/RecordTags.vue'
 import { canViewQuotations } from '@/composables/erpnext'
 import { callEnabled } from '@/composables/telephony'
 import { useCommandPaletteContext } from '@/composables/useCommandPalette'

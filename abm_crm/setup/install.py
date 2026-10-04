@@ -8,6 +8,9 @@ SETTINGS_DEFAULTS = {
 	"include_default_outgoing": 1,
 	"default_phone_region": "IN",
 	"whatsapp_mode": "Click to Chat",
+	"call_sync_scope": "CRM numbers only",
+	"upload_recordings": 1,
+	"push_enabled": 1,
 }
 
 
@@ -84,6 +87,66 @@ def get_custom_fields():
 	return {
 		"CRM Lead": [*campaign_fields(), routing_rule_field()],
 		"CRM Deal": [*campaign_fields(), routing_rule_field()],
+		"CRM Call Log": [call_outcome_field()],
+		"Tag": tag_fields(),
+	}
+
+
+TAG_CATEGORIES = ("Builder", "Project", "Location", "Budget", "Other")
+TAG_COLORS = (
+	"gray",
+	"blue",
+	"green",
+	"red",
+	"pink",
+	"orange",
+	"amber",
+	"yellow",
+	"cyan",
+	"teal",
+	"violet",
+	"purple",
+)
+
+
+def tag_fields():
+	"""Category and color for Frappe's Tag, used to group and color tags on leads and deals."""
+	return [
+		{
+			"fieldname": "abm_category",
+			"label": "Category",
+			"fieldtype": "Select",
+			"options": "\n" + "\n".join(TAG_CATEGORIES),
+			"insert_after": "description",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"module": "Abm Crm",
+		},
+		{
+			"fieldname": "abm_color",
+			"label": "Color",
+			"fieldtype": "Select",
+			"options": "\n" + "\n".join(TAG_COLORS),
+			"insert_after": "abm_category",
+			"in_list_view": 1,
+			"module": "Abm Crm",
+		},
+	]
+
+
+CALL_OUTCOMES = ("Interested", "Not Interested", "Call Back", "No Answer", "Wrong Number", "Busy", "Converted")
+
+
+def call_outcome_field():
+	"""What came of a call, set by the rep from the mobile app."""
+	return {
+		"fieldname": "abm_outcome",
+		"label": "Outcome",
+		"fieldtype": "Select",
+		"options": "\n" + "\n".join(CALL_OUTCOMES),
+		"insert_after": "status",
+		"in_standard_filter": 1,
+		"module": "Abm Crm",
 	}
 
 

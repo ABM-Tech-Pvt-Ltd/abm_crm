@@ -203,6 +203,11 @@
                 })
             "
           />
+          <!-- abm_crm: Tags column as chips -->
+          <TagChips
+            v-else-if="column.key === '_user_tags'"
+            :value="typeof item === 'string' ? item : ''"
+          />
           <div
             v-else-if="label"
             class="truncate text-base"
@@ -271,6 +276,7 @@ import {
 import { sessionStore } from '@/stores/session'
 import { isMobileView } from '@/composables/settings'
 import MobileRecordCards from '@/components/ABM/MobileRecordCards.vue'
+import TagChips from '@/components/ABM/TagChips.vue'
 import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 

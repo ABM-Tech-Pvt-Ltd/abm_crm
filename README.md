@@ -54,6 +54,15 @@ ABM CRM is an add-on app. It never edits Frappe CRM's code, so you keep getting 
   WhatsApp Web with the message typed in. No Meta account, no per-message cost. Every message is
   logged on the lead. Templates are managed in Settings > WhatsApp Templates.
 
+**Tags: know which builder to talk as**
+- Colored tags on every lead and deal (category Builder, Project, Location, Budget or Other). Add
+  one from the side panel (or under the call bar on phones): search existing tags or create a new
+  one with a category and color.
+- A lead tagged with a **Builder** (e.g. `Lodha`) shows a **"Talk as: Lodha"** banner, so the rep
+  speaks as that builder's agent. Tags also show on the mobile cards.
+- Lists: add the **Tags** column (column settings) to see the chips, and filter with
+  Filter → **Tags** → like → `Lodha`.
+
 **Made for phones**
 - **Bottom navigation**: Leads, Deals, Tasks, Alerts, and More for everything else.
 - **Card lists** for leads and deals instead of tables that scroll sideways.
@@ -184,6 +193,12 @@ Rebuild ABM CRM after every Frappe CRM upgrade.
 bench --site your-test-site set-config allow_tests true
 bench --site your-test-site run-tests --app abm_crm
 ```
+
+## Mobile app
+
+An Android app for reps and managers (leads, deals, calendar, email, tags, call logging, team dashboard) is in
+[abm-crm-mobile](https://github.com/ABM-Tech-Pvt-Ltd/abm-crm-mobile). It talks to the API in
+[docs/mobile-api.md](docs/mobile-api.md), and shows your CRM's brand name and logo.
 
 ## Roadmap
 

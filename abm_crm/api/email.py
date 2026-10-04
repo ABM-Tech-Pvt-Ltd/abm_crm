@@ -114,6 +114,9 @@ def _is_crm_composer_email(doc) -> bool:
 	if doc.reference_doctype not in CRM_DOCTYPES:
 		return False
 	# only emails sent by a user from the composer; skip automations, notifications and imports
+	if frappe.flags.abm_crm_composer:
+		# the mobile app's composer (abm_crm.api.mobile.send_email)
+		return True
 	request = getattr(frappe.local, "request", None)
 	return bool(request and request.path.rstrip("/").endswith(EMAIL_MAKE_PATH))
 

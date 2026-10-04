@@ -62,6 +62,13 @@
     :email="doc.email"
     @email="changeTabTo('emails')"
   />
+  <!-- abm_crm: tags + "Talk as <Builder>" -->
+  <RecordTags
+    v-if="doc.name"
+    variant="mobile"
+    doctype="CRM Deal"
+    :docname="props.dealId"
+  />
   <div v-if="doc.name" class="flex h-full overflow-hidden">
     <Tabs
       v-model="tabIndex"
@@ -314,6 +321,8 @@ import { useDocument } from '@/data/document'
 import { isMobileView } from '@/composables/settings'
 import { whatsappTabVisible } from '@/composables/whatsapp'
 import ContactActions from '@/components/ABM/ContactActions.vue'
+// abm_crm: record tags
+import RecordTags from '@/components/ABM/RecordTags.vue'
 import { callEnabled } from '@/composables/telephony'
 import { canViewQuotations } from '@/composables/erpnext'
 import { useActiveTabManager } from '@/composables/useActiveTabManager'

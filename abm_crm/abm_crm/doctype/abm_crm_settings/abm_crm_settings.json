@@ -11,7 +11,13 @@
   "phone_section",
   "default_phone_region",
   "whatsapp_section",
-  "whatsapp_mode"
+  "whatsapp_mode",
+  "mobile_section",
+  "call_sync_scope",
+  "upload_recordings",
+  "push_section",
+  "push_enabled",
+  "fcm_service_account"
  ],
  "fields": [
   {
@@ -65,11 +71,51 @@
    "fieldtype": "Select",
    "label": "WhatsApp Mode",
    "options": "Click to Chat\nCloud API"
+  },
+  {
+   "fieldname": "mobile_section",
+   "fieldtype": "Section Break",
+   "label": "Mobile App"
+  },
+  {
+   "default": "CRM numbers only",
+   "description": "Which phone calls the mobile app saves as call logs. CRM numbers only keeps calls with numbers that belong to a lead, deal or contact; All calls keeps every call.",
+   "fieldname": "call_sync_scope",
+   "fieldtype": "Select",
+   "label": "Call Sync Scope",
+   "options": "CRM numbers only\nAll calls"
+  },
+  {
+   "default": "1",
+   "description": "Ask the mobile app to upload call recordings, when the phone records calls",
+   "fieldname": "upload_recordings",
+   "fieldtype": "Check",
+   "label": "Upload Call Recordings"
+  },
+  {
+   "fieldname": "push_section",
+   "fieldtype": "Section Break",
+   "label": "Push Notifications"
+  },
+  {
+   "default": "1",
+   "description": "Send push notifications to the mobile app through Firebase Cloud Messaging",
+   "fieldname": "push_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Push Notifications"
+  },
+  {
+   "description": "Firebase service account key (JSON) with permission to send messages. Firebase console > Project settings > Service accounts > Generate new private key.",
+   "fieldname": "fcm_service_account",
+   "fieldtype": "Code",
+   "label": "FCM Service Account",
+   "options": "JSON",
+   "permlevel": 1
   }
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-10-04 12:00:00.000000",
+ "modified": "2026-10-04 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "Abm Crm",
  "name": "ABM CRM Settings",
@@ -85,6 +131,12 @@
    "create": 1,
    "read": 1,
    "role": "Sales Manager",
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "System Manager",
    "write": 1
   }
  ],

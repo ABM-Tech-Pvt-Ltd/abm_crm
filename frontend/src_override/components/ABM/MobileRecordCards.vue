@@ -44,6 +44,28 @@
             {{ row.modified.timeAgo }}
           </span>
         </div>
+        <!-- abm_crm: tags (builder first) -->
+        <div
+          v-if="rowTags(row).length"
+          class="flex flex-wrap items-center gap-1"
+          data-testid="abm-card-tags"
+        >
+          <span
+            v-for="tag in rowTags(row).slice(0, 3)"
+            :key="tag.name"
+            class="inline-flex h-5 max-w-[9rem] items-center gap-1 rounded-full border px-1.5 text-xs"
+            :class="[
+              tagChipClass(tag.color),
+              tag.category == 'Builder' ? 'font-semibold' : '',
+            ]"
+          >
+            <span class="size-1.5 shrink-0 rounded-full" :class="tagDotClass(tag.color)" />
+            <span class="truncate">{{ tag.name }}</span>
+          </span>
+          <span v-if="rowTags(row).length > 3" class="text-xs text-ink-gray-5">
+            +{{ rowTags(row).length - 3 }}
+          </span>
+        </div>
       </div>
       <div v-if="phone(row)" class="flex shrink-0 gap-1.5" @click.stop>
         <a
@@ -75,8 +97,10 @@ import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import WhatsAppIcon from '@/components/Icons/WhatsAppIcon.vue'
 import { toWhatsappDigits } from '@/composables/whatsapp'
 import { useVisitedRecords } from '@/composables/useVisitedRecords'
-import { Avatar } from 'frappe-ui'
+import { Avatar, createResource } from 'frappe-ui'
 import { useRoute } from 'vue-router'
+import { computed, watch } from 'vue'
+import { parseUserTags, tagChipClass, tagDotClass, useTags } from './tags'
 
 const props = defineProps({
   doctype: { type: String, required: true },
@@ -114,6 +138,35 @@ function subtitle(row) {
 
 function image(row) {
   return row.lead_name?.image || row.organization?.logo || ''
+}
+
+// `_user_tags` is only in the rows when the Tags column is on, so fetch it for the visible rows
+const { tagMeta } = useTags()
+const names = computed(() => props.rows.map((r) => r.name).filter(Boolean))
+const userTags = createResource({
+  url: 'frappe.client.get_list',
+  makeParams: () => ({
+    doctype: props.doctype,
+    fields: ['name', '_user_tags'],
+    filters: { name: ['in', names.value] },
+    limit_page_length: names.value.length,
+  }),
+})
+watch(
+  () => names.value.join(','),
+  (key) => key && userTags.fetch(),
+  { immediate: true },
+)
+const tagsByName = computed(() => {
+  const map = {}
+  for (const r of userTags.data || []) map[r.name] = parseUserTags(r._user_tags)
+  return map
+})
+const categoryRank = (t) => (t.category == 'Builder' ? 0 : 1)
+
+function rowTags(row) {
+  const list = tagsByName.value[row.name] ?? parseUserTags(row._user_tags)
+  return list.map(tagMeta).sort((a, b) => categoryRank(a) - categoryRank(b))
 }
 
 function phone(row) {
