@@ -18,6 +18,13 @@
       :docname="docname"
     />
     <QuotationsList v-else-if="title == 'Quotations'" :deal="docname" />
+    <!-- abm_crm: site visits (check-ins) from the mobile app -->
+    <FieldVisits
+      v-else-if="title == 'Visits'"
+      ref="fieldVisits"
+      :doctype="doctype"
+      :docname="docname"
+    />
     <div
       v-else-if="all_activities?.loading"
       class="flex flex-1 flex-col items-center justify-center gap-3 text-2xl-medium text-ink-gray-4"
@@ -201,6 +208,43 @@
               :activity="activity"
               @reload="all_activities.reload()"
             />
+          </div>
+          <div
+            v-else-if="activity.activity_type == 'field_visit'"
+            :id="activity.name"
+            class="mb-4 flex flex-col gap-2 py-1.5"
+          >
+            <div class="flex items-center justify-stretch gap-2 text-base">
+              <div class="inline-flex flex-wrap items-center gap-1.5 text-ink-gray-8">
+                <span class="font-medium">{{ activity.data.visited_by_name }}</span>
+                <span class="text-ink-gray-5">{{ __('checked in') }}</span>
+                <span v-if="activity.data.address" class="text-ink-gray-7">
+                  {{ __('at') }} {{ activity.data.address }}
+                </span>
+              </div>
+              <div class="ml-auto whitespace-nowrap">
+                <TimelineTimestamp :date="activity.creation" />
+              </div>
+            </div>
+            <div
+              v-if="activity.data.notes"
+              class="whitespace-pre-wrap text-base text-ink-gray-8"
+            >
+              {{ activity.data.notes }}
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <a v-if="activity.data.photo_url" :href="activity.data.photo_url" target="_blank">
+                <img
+                  :src="activity.data.photo_url"
+                  :alt="__('Visit photo')"
+                  loading="lazy"
+                  class="h-24 w-32 rounded-md border border-outline-gray-1 object-cover"
+                />
+              </a>
+              <a :href="activity.data.map_url" target="_blank">
+                <Button size="sm" variant="subtle" :label="__('Open in Maps')" />
+              </a>
+            </div>
           </div>
           <div
             v-else-if="activity.activity_type == 'attachment_log'"
@@ -487,6 +531,8 @@ import { usersStore } from '@/stores/users'
 import { useTimelinePreferences } from '@/composables/useTimelinePreferences'
 import { whatsappEnabled, quickWhatsappEnabled } from '@/composables/whatsapp'
 import QuickWhatsApp from '@/components/ABM/QuickWhatsApp.vue'
+import FieldVisits from '@/components/ABM/FieldVisits.vue'
+import VisitIcon from '@/components/Icons/VisitIcon.vue'
 import { useDocument } from '@/data/document'
 import { useTelemetry } from 'frappe-ui/frappe'
 import { Button, createResource, toast } from 'frappe-ui'
@@ -612,6 +658,7 @@ function handleDocinfoUpdate({ doc, key }) {
   if (doc.reference_name !== props.docname) return
 
   all_activities.reload()
+  visitActivities.reload()
   _document.reload()
 }
 
@@ -636,11 +683,35 @@ function sendTemplate(template) {
 
 const replyMessage = ref({})
 
+// abm_crm: site visits also show in the Activity timeline
+const fieldVisits = ref(null)
+const visitActivities = createResource({
+  url: 'abm_crm.api.visits.get_visits',
+  cache: ['abm_field_visits_timeline', props.doctype, props.docname],
+  // the parent page reuses this component when moving between records
+  makeParams: () => ({ doctype: props.doctype, name: props.docname }),
+  auto: ['CRM Lead', 'CRM Deal'].includes(props.doctype),
+  transform: (rows) =>
+    (rows || []).map((v) => ({
+      name: 'visit-' + v.name,
+      activity_type: 'field_visit',
+      creation: v.visited_at || v.creation,
+      owner: v.visited_by,
+      data: v,
+    })),
+})
+
+watch(
+  () => props.docname,
+  () => visitActivities.reload(),
+)
+
 function get_activities() {
   if (!all_activities.data?.versions) return []
+  const visits = visitActivities.data || []
   if (!all_activities.data?.calls.length)
-    return all_activities.data.versions || []
-  return [...all_activities.data.versions, ...all_activities.data.calls]
+    return [...(all_activities.data.versions || []), ...visits]
+  return [...all_activities.data.versions, ...all_activities.data.calls, ...visits]
 }
 
 const activities = computed(() => {
@@ -672,6 +743,10 @@ const activities = computed(() => {
   }
 
   _activities.forEach((activity) => {
+    if (activity.activity_type == 'field_visit') {
+      activity.icon = markRaw(VisitIcon)
+      return
+    }
     activity.icon = timelineIcon(activity.activity_type, activity.is_lead)
 
     if (

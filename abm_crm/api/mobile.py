@@ -29,6 +29,7 @@ from frappe.utils import (
 from frappe.utils.password import set_encrypted_password
 
 from abm_crm.api.tags import attach_tags, doc_tags, names_with_tag
+from abm_crm.api.visits import get_visits, photo_url
 from abm_crm.setup.install import CALL_OUTCOMES
 
 CRM_DOCTYPES = ("CRM Lead", "CRM Deal")
@@ -253,7 +254,8 @@ def change_password(old_password: str, new_password: str) -> dict:
 	try:
 		check_password(user, old_password, delete_tracker_cache=False)
 	except frappe.AuthenticationError:
-		frappe.throw(_("Your current password is not correct"), frappe.AuthenticationError)
+		# ValidationError (417), not AuthenticationError (401): the app treats 401 as a dead session
+		frappe.throw(_("Your current password is not correct"), frappe.ValidationError)
 	if old_password == new_password:
 		frappe.throw(_("The new password must be different from the current one"))
 	strength = test_password_strength(new_password, user_data=(user,)) or {}
@@ -337,6 +339,12 @@ def disable_devices(user: str, token: str | None = None) -> None:
 		frappe.db.set_value("ABM Mobile Device", name, "enabled", 0, update_modified=False)
 
 
+def check_mobile_free(number: str):
+	"""User.mobile_no is unique: say so instead of failing with a database error."""
+	if frappe.db.exists("User", {"mobile_no": number, "name": ["!=", frappe.session.user]}):
+		frappe.throw(_("The number {0} is already used by another CRM user").format(number))
+
+
 @frappe.whitelist(methods=["POST"])
 def set_my_mobile(mobile_no: str) -> dict:
 	"""Save the rep's own phone number. Call sync needs it as the other side of each call."""
@@ -345,6 +353,7 @@ def set_my_mobile(mobile_no: str) -> dict:
 	from abm_crm.api.whatsapp import to_whatsapp_number
 
 	number = "+" + to_whatsapp_number(mobile_no)  # throws a readable error for invalid numbers
+	check_mobile_free(number)
 	frappe.db.set_value("User", frappe.session.user, "mobile_no", number)
 	return {"mobile_no": number}
 
@@ -364,6 +373,7 @@ def bootstrap() -> dict:
 		"lead_statuses": get_statuses("CRM Lead Status"),
 		"deal_statuses": get_statuses("CRM Deal Status"),
 		"lead_sources": frappe.get_all("CRM Lead Source", pluck="name", order_by="name asc"),
+		"call_outcomes": list(CALL_OUTCOMES),
 		"users": crm_users(),
 		"settings": {
 			"call_sync_scope": call_sync_scope(),
@@ -531,9 +541,8 @@ def get_record(doctype: str, name: str) -> dict:
 			order_by="creation desc",
 			limit=50,
 		),
-		"visits": frappe.get_all(
-			"ABM Field Visit", filters=ref, fields=VISIT_FIELDS, order_by="creation desc", limit=50
-		),
+		# with the lead's visits for a deal, the visitor's name and a photo URL anyone on the record can open
+		"visits": get_visits(doctype, name)[:50],
 		"whatsapp": frappe.get_all(
 			"ABM WhatsApp Log",
 			filters={"reference_doctype": doctype, "reference_name": name},
@@ -720,7 +729,27 @@ def sync_calls(calls: list | str, device_id: str) -> list[dict]:
 		all_calls=call_sync_scope() == "All calls",
 		upload=recordings_enabled(),
 	)
-	return [sync_call(frappe._dict(c), context) for c in calls]
+	return [sync_call_safely(frappe._dict(c), context) for c in calls]
+
+
+def sync_call_safely(call, ctx) -> dict:
+	"""One bad call must not fail (and roll back) the whole batch, or the app would retry it forever."""
+	frappe.db.savepoint("abm_sync_call")
+	try:
+		return sync_call(call, ctx)
+	except Exception as e:
+		frappe.db.rollback(save_point="abm_sync_call")
+		frappe.clear_messages()
+		frappe.log_error(title="ABM call sync failed", message=frappe.get_traceback())
+		return {
+			"device_call_id": call.get("device_call_id"),
+			"call_log": None,
+			"reference_doctype": None,
+			"reference_docname": None,
+			"reference_title": None,
+			"upload_recording": False,
+			"error": str(e),
+		}
 
 
 def sync_call(call, ctx) -> dict:
@@ -914,8 +943,13 @@ def check_in(
 	accuracy: float | None = None,
 	address: str | None = None,
 	notes: str | None = None,
+	visited_at: str | None = None,
 ) -> dict:
-	"""Record a visit to a lead or deal. An optional multipart `file` is saved as the photo."""
+	"""Record a visit to a lead or deal. An optional multipart `file` is saved as the photo.
+
+	`visited_at` is when the visit happened (a check-in made offline is sent later); the visit
+	controller only accepts a recent time and uses now otherwise.
+	"""
 	get_crm_doc(reference_doctype, reference_docname)
 	latitude, longitude = flt(latitude), flt(longitude)
 	if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
@@ -936,13 +970,15 @@ def check_in(
 			"address": address,
 			"notes": notes,
 			"visited_by": frappe.session.user,
-			"visited_at": now_datetime(),
+			"visited_at": visited_at or now_datetime(),
 		}
 	).insert()
 	if upload:
 		file = attach_file(upload[0], upload[1], "ABM Field Visit", visit.name, "photo")
 		visit.db_set("photo", file.file_url)
-	return {f: visit.get(f) for f in VISIT_FIELDS}
+	row = {f: visit.get(f) for f in VISIT_FIELDS}
+	row["photo_url"] = photo_url(visit.name) if visit.photo else None
+	return row
 
 
 # Manager dashboard
@@ -1428,12 +1464,23 @@ def get_dashboard() -> dict:
 			),
 			"calls_today": calls["count"],
 			"talk_time_today": calls["talk_time"],
+			# leads the user can see, created today / in the last 7 days
+			"new_leads_today": visible_count("CRM Lead", [["creation", ">=", today_start]]),
+			"new_leads_week": visible_count(
+				"CRM Lead", [["creation", ">=", today_start - datetime.timedelta(days=6)]]
+			),
 			"unread_notifications": unread_notifications(),
 		},
 		"agenda": agenda_items(today_start, add_days(tomorrow, 1)),
 		"pipeline": pipeline,
 		"recent": recent_records(8),
 	}
+
+
+def visible_count(doctype: str, filters: list) -> int:
+	"""Count of the records the user can see (frappe.db.count ignores permissions)."""
+	rows = frappe.get_list(doctype, filters=filters, fields=[{"COUNT": "*", "as": "n"}], order_by=None)
+	return cint(rows[0].n) if rows else 0
 
 
 def deal_totals(filters: list, group_by_status: bool = False) -> list:
@@ -1651,8 +1698,7 @@ def mark_notifications_read(names: list | str | None = None) -> dict:
 	filters = {"to_user": frappe.session.user, "read": 0}
 	if names:
 		filters["name"] = ["in", list(names)]
-	for name in frappe.get_all("CRM Notification", filters=filters, pluck="name"):
-		frappe.db.set_value("CRM Notification", name, "read", 1)
+	frappe.db.set_value("CRM Notification", filters, "read", 1)
 	return {"unread": unread_notifications()}
 
 
@@ -2508,15 +2554,20 @@ def update_profile(
 			from abm_crm.api.whatsapp import to_whatsapp_number
 
 			values["mobile_no"] = "+" + to_whatsapp_number(mobile_no)
+			check_mobile_free(values["mobile_no"])
 		else:
 			values["mobile_no"] = None
 	if values or upload:
-		doc = frappe.get_doc("User", user)
-		doc.update(values)
 		if upload:
 			# public, like profile photos uploaded on the web, so other users can see it
 			file = attach_file(upload[0], upload[1], "User", user, "user_image", is_private=0)
-			doc.user_image = file.file_url
-		# the user's own record and only these fields; Sales Users have no User write permission
-		doc.save(ignore_permissions=True)
+			values["user_image"] = file.file_url
+		if "first_name" in values or "last_name" in values:
+			current = frappe.db.get_value("User", user, ["first_name", "middle_name", "last_name"], as_dict=True)
+			current.update({k: v for k, v in values.items() if k in ("first_name", "last_name")})
+			values["full_name"] = " ".join(p for p in (current.first_name, current.middle_name, current.last_name) if p)
+		# Written straight to the user's own row. Saving the whole User document runs its hooks (and
+		# Sales Users have no write permission on it); only these fields change and the session stays valid.
+		frappe.db.set_value("User", user, values)
+		frappe.clear_cache(user=user)
 	return get_profile()

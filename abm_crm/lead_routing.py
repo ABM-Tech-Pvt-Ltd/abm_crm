@@ -200,6 +200,11 @@ def pick_user(rule, dry_run: bool = False) -> str | None:
 			user = min(available, key=lambda row: load[row.user]).user
 		else:
 			users = [row.user for row in available]
+			if not dry_run:
+				# lock the rule so two leads arriving together don't both go to the same user
+				rule.last_user = frappe.db.get_value(
+					"ABM Lead Routing Rule", rule.name, "last_user", for_update=True
+				)
 			last = rule.last_user if rule.last_user in [r.user for r in rows] else None
 			order = list(dict.fromkeys(r.user for r in rows))  # unique, keeps list order
 			start = order.index(last) + 1 if last else 0

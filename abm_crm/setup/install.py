@@ -18,12 +18,21 @@ def after_install():
 	setup_custom_fields()
 	setup_settings_defaults()
 	setup_whatsapp_templates()
+	add_campaign_section()
 
 
 def after_migrate():
 	setup_custom_fields()
 	setup_settings_defaults()
 	setup_whatsapp_templates()
+
+
+def add_campaign_section():
+	# patches are marked done on a fresh install without running, so run this one here once.
+	# Not on every migrate: users may remove the section from the side panel.
+	from abm_crm.patches.v1_0.add_campaign_section_to_side_panel import execute
+
+	execute()
 
 
 DEFAULT_WHATSAPP_TEMPLATES = [
