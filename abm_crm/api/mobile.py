@@ -86,11 +86,15 @@ TASK_FIELDS = [
 	"description",
 	"status",
 	"priority",
+	"start_date",
 	"due_date",
 	"assigned_to",
 	"reference_doctype",
 	"reference_docname",
 ]
+TASK_STATUSES = ("Backlog", "Todo", "In Progress", "Done", "Canceled")
+TASK_PRIORITIES = ("Low", "Medium", "High")
+EVENT_CATEGORIES = ("Event", "Meeting", "Call", "Other")
 CALL_FIELDS = [
 	"name",
 	"type",
@@ -644,10 +648,13 @@ def create_task(
 	priority: str = "Medium",
 	assigned_to: str | None = None,
 	description: str | None = None,
+	status: str | None = None,
+	start_date: str | None = None,
 ) -> dict:
 	"""A task on a lead/deal, or a standalone task (from the app's create button)."""
 	if not (title or "").strip():
 		frappe.throw(_("Task title is required"))
+	check_task_values(status, priority)
 	if reference_doctype or reference_docname:
 		get_crm_doc(reference_doctype, reference_docname)
 	task = frappe.get_doc(
@@ -656,7 +663,8 @@ def create_task(
 			"title": title,
 			"description": description,
 			"priority": priority or "Medium",
-			"status": "Todo",
+			"status": status or "Todo",
+			"start_date": start_date or None,
 			"due_date": due_date or None,
 			"assigned_to": assigned_to or frappe.session.user,
 			"reference_doctype": reference_doctype or None,
@@ -676,13 +684,19 @@ def update_task(
 	description: str | None = None,
 	priority: str | None = None,
 	assigned_to: str | None = None,
+	start_date: str | None = None,
 ) -> dict:
-	"""Only the values sent are changed."""
+	"""Only the values sent are changed; "" clears the due/start date."""
 	task = frappe.get_doc("CRM Task", name)
 	task.check_permission("write")
+	check_task_values(status, priority)
+	for field, value in (("due_date", due_date), ("start_date", start_date)):
+		if value == "":
+			task.set(field, None)
 	values = {
 		"status": status,
 		"due_date": due_date,
+		"start_date": start_date,
 		"title": title,
 		"description": description,
 		"priority": priority,
@@ -693,6 +707,26 @@ def update_task(
 			task.set(field, value)
 	task.save()
 	return task_row(task)
+
+
+def check_task_values(status: str | None, priority: str | None):
+	if status and status not in TASK_STATUSES:
+		frappe.throw(_("Unknown task status {0}").format(status))
+	if priority and priority not in TASK_PRIORITIES:
+		frappe.throw(_("Unknown priority {0}").format(priority))
+
+
+@frappe.whitelist()
+@formatted
+def get_task(name: str | int) -> dict:
+	task = frappe.get_doc("CRM Task", name)
+	task.check_permission("read")
+	row = task_row(task)
+	row["can_edit"] = bool(task.has_permission("write"))
+	row["can_delete"] = bool(task.has_permission("delete"))
+	if task.reference_doctype in CRM_DOCTYPES and task.reference_docname:
+		row["reference_title"] = record_title(task.reference_doctype, task.reference_docname)
+	return row
 
 
 @frappe.whitelist(methods=["POST"])
@@ -1376,7 +1410,20 @@ EMAIL_FIELDS = [
 ]
 EMAIL_INTERNAL_FIELDS = ("communication_date", "reference_doctype", "reference_name")
 ATTACHMENT_FIELDS = ["name", "file_name", "file_url", "file_size", "is_private", "owner", "creation"]
-EVENT_FIELDS = ["name", "subject", "starts_on", "ends_on", "all_day", "status", "owner", "description"]
+EVENT_FIELDS = [
+	"name",
+	"subject",
+	"starts_on",
+	"ends_on",
+	"all_day",
+	"status",
+	"owner",
+	"description",
+	"event_category",
+	"event_type",
+	"location",
+	"_assign",
+]
 MAX_SEARCH_RESULTS = 50
 
 
@@ -2111,6 +2158,23 @@ def update_note(name: str, title: str | None = None, content: str | None = None)
 	return {f: note.get(f) for f in ("name", "title", "content", "owner", "creation")}
 
 
+@frappe.whitelist()
+@formatted
+def get_note(name: str) -> dict:
+	note = frappe.get_doc("FCRM Note", name)
+	note.check_permission("read")
+	row = {f: note.get(f) for f in ("name", "title", "content", "owner", "creation", "modified")}
+	row.update(
+		{
+			"reference_doctype": note.reference_doctype,
+			"reference_docname": note.reference_docname,
+			"can_edit": bool(note.has_permission("write")),
+			"can_delete": bool(note.has_permission("delete")),
+		}
+	)
+	return row
+
+
 @frappe.whitelist(methods=["POST"])
 def delete_note(name: str) -> None:
 	frappe.delete_doc("FCRM Note", name)
@@ -2420,6 +2484,8 @@ def event_item(event, ref=None) -> dict:
 		"end": event.ends_on,
 		"all_day": cint(event.all_day),
 		"status": event.status,
+		"location": event.get("location"),
+		"category": event.get("event_category"),
 		"reference_doctype": ref[0],
 		"reference_docname": ref[1],
 		"reference_title": ref[2],
@@ -2436,16 +2502,25 @@ def create_event(
 	description: str | None = None,
 	reference_doctype: str | None = None,
 	reference_docname: str | None = None,
+	event_category: str | None = None,
+	event_type: str | None = None,
+	location: str | None = None,
+	assignees: list | str | None = None,
 ) -> dict:
-	"""A private Event owned by the session user, linked to a lead or deal as a participant."""
+	"""An Event owned by the session user, linked to a lead or deal as a participant.
+
+	`assignees` (user ids) get it assigned (a ToDo each), so it shows in their calendar too.
+	"""
 	if not (subject or "").strip():
 		frappe.throw(_("Subject is required"))
+	check_event_values(event_category, event_type)
 	event = frappe.get_doc(
 		{
 			"doctype": "Event",
 			"subject": subject.strip(),
-			"event_type": "Private",
-			"event_category": "Event",
+			"event_type": event_type or "Private",
+			"event_category": event_category or "Event",
+			"location": (location or "").strip() or None,
 			"starts_on": get_datetime(starts_on),
 			"ends_on": get_datetime(ends_on) if ends_on else None,
 			"all_day": cint(all_day),
@@ -2457,6 +2532,7 @@ def create_event(
 		get_crm_doc(reference_doctype, reference_docname)
 		event.add_participant(reference_doctype, reference_docname)
 	event.insert()
+	set_event_assignees(event, assignees)
 	return event_agenda_item(event)
 
 
@@ -2472,9 +2548,21 @@ def update_event(
 	status: str | None = None,
 	reference_doctype: str | None = None,
 	reference_docname: str | None = None,
+	event_category: str | None = None,
+	event_type: str | None = None,
+	location: str | None = None,
+	assignees: list | str | None = None,
 ) -> dict:
-	"""Owner only. Values not sent are kept; `ends_on=""` clears the end, a new reference replaces the old."""
+	"""Owner only. Values not sent are kept; `ends_on=""` clears the end, a new reference replaces the old.
+	`assignees` (when sent) is the full list: users not in it are unassigned."""
 	event = get_own_event(name)
+	check_event_values(event_category, event_type)
+	if event_category:
+		event.event_category = event_category
+	if event_type:
+		event.event_type = event_type
+	if location is not None:
+		event.location = location.strip() or None
 	if subject is not None:
 		if not subject.strip():
 			frappe.throw(_("Subject is required"))
@@ -2496,6 +2584,8 @@ def update_event(
 		]
 		event.add_participant(reference_doctype, reference_docname)
 	event.save()
+	if assignees is not None:
+		set_event_assignees(event, assignees)
 	return event_agenda_item(event)
 
 
@@ -2504,6 +2594,68 @@ def delete_event(name: str) -> None:
 	get_own_event(name)
 	# Event gives Desk Users no delete permission; the owner check above stands in for it
 	frappe.delete_doc("Event", name, ignore_permissions=True)
+
+
+def check_event_values(category: str | None, event_type: str | None):
+	if category and category not in EVENT_CATEGORIES:
+		frappe.throw(_("Unknown event category {0}").format(category))
+	if event_type and event_type not in ("Private", "Public"):
+		frappe.throw(_("Event type must be Private or Public"))
+
+
+def event_assignees(event_name: str) -> list[str]:
+	return frappe.get_all(
+		"ToDo",
+		filters={"reference_type": "Event", "reference_name": event_name, "status": ["!=", "Cancelled"]},
+		pluck="allocated_to",
+	)
+
+
+def set_event_assignees(event, assignees: list | str | None):
+	"""Make the event's assignees exactly `assignees` (CRM users only)."""
+	# the owner already passed get_own_event / created it; Event gives Sales Users no write permission
+	from frappe.desk.form.assign_to import _add, _remove
+
+	wanted = frappe.parse_json(assignees) if isinstance(assignees, str) else (assignees or [])
+	wanted = [u for u in dict.fromkeys(wanted) if u and frappe.db.exists("User", {"name": u, "enabled": 1})]
+	current = set(event_assignees(event.name))
+	for user in current - set(wanted):
+		_remove("Event", event.name, user, ignore_permissions=True)
+	new = [u for u in wanted if u not in current]
+	if new:
+		_add(
+			{"assign_to": new, "doctype": "Event", "name": event.name, "description": event.subject},
+			ignore_permissions=True,
+		)
+
+
+@frappe.whitelist()
+@formatted
+def get_event(name: str) -> dict:
+	"""An event the user can see in their calendar, with everything the edit screen shows."""
+	event = frappe.get_doc("Event", name)
+	user = frappe.session.user
+	assignees = event_assignees(event.name)
+	is_participant = any(p.get("email") == user for p in event.event_participants or [])
+	if not (
+		event.owner == user
+		or user in assignees
+		or is_participant
+		or event.event_type == "Public"
+		or event.has_permission("read")
+	):
+		raise frappe.PermissionError
+	row = event_agenda_item(event)
+	row.update(
+		{
+			"description": event.description,
+			"event_type": event.event_type,
+			"owner": event.owner,
+			"assignees": assignees,
+			"can_edit": event.owner == user,
+		}
+	)
+	return row
 
 
 def get_own_event(name: str):

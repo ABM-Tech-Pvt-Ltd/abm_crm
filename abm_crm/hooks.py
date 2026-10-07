@@ -30,6 +30,8 @@ doc_events = {
 	"Email Account": {
 		# before_validate: Email Account.validate() tests the login, so clean the password first
 		"before_validate": "abm_crm.api.email_account.clean_account_password",
+		# "Create lead from incoming email" off must really stop lead creation (see the function)
+		"validate": "abm_crm.api.email_account.sync_lead_creation",
 	},
 	"CRM Lead": {
 		"before_insert": "abm_crm.lead_routing.before_insert_lead",

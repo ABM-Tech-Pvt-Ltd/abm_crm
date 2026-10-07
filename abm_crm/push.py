@@ -113,7 +113,13 @@ def build_message(token: str, title: str, body: str, data: dict | None = None) -
 		"data": {str(k): "" if v is None else str(v) for k, v in (data or {}).items()},
 		"android": {
 			"priority": "high",
-			"notification": {"channel_id": "default", "sound": "default"},
+			# the app's white status-bar icon (res/drawable/notification_icon) in the brand colour
+			"notification": {
+				"channel_id": "default",
+				"sound": "default",
+				"icon": "notification_icon",
+				"color": "#ff6a00",
+			},
 		},
 	}
 

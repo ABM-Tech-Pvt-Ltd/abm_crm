@@ -128,3 +128,22 @@ def clean_account_password(doc, method=None):
 	"""
 	if doc.password and not doc.is_dummy_password(doc.password):
 		doc.password = clean_password(doc.service, doc.password)
+
+
+def sync_lead_creation(doc, method=None):
+	"""Make "Create lead from incoming email" the only switch for leads from email.
+
+	Frappe CRM sets the account's "Append To" (and the INBOX folder's) to CRM Lead when it creates
+	an email account. Frappe's email receiver then creates a CRM Lead for every incoming email that
+	isn't a reply to a known record, whatever the CRM checkbox says. The checkbox only controls
+	CRM's own hook (crm.utils.create_lead_from_incoming_email), which creates the lead by itself
+	when it is on. So with the checkbox off, CRM Lead is removed from "Append To"; emails still
+	arrive and replies still link to their lead or deal.
+	"""
+	if not doc.meta.has_field("create_lead_from_incoming_email") or doc.create_lead_from_incoming_email:
+		return
+	if doc.append_to == "CRM Lead":
+		doc.append_to = None
+	for row in doc.get("imap_folder") or []:
+		if row.append_to == "CRM Lead":
+			row.append_to = None
