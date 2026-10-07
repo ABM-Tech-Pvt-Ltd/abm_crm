@@ -36,7 +36,7 @@
         <div class="flex items-center gap-2">
           <UserAvatar :user="visit.visited_by" size="sm" />
           <span class="truncate text-base font-medium text-ink-gray-8">
-            {{ visit.visited_by_name }}
+            {{ visitorName(visit) }}
           </span>
           <span class="text-base text-ink-gray-5">{{ __('checked in') }}</span>
           <Tooltip :text="formatDate(visit.visited_at)">
@@ -70,6 +70,7 @@
 import VisitIcon from '@/components/Icons/VisitIcon.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import { formatDate, timeAgo } from '@/utils'
+import { usersStore } from '@/stores/users'
 import { Button, Tooltip, createResource } from 'frappe-ui'
 import { watch } from 'vue'
 
@@ -77,6 +78,13 @@ const props = defineProps({
   doctype: { type: String, required: true },
   docname: { type: String, required: true },
 })
+
+const { getUser } = usersStore()
+// the CRM's user list has the name even when the server sends only the email
+const visitorName = (v) =>
+  (v.visited_by_name && v.visited_by_name !== v.visited_by && v.visited_by_name) ||
+  getUser(v.visited_by)?.full_name ||
+  v.visited_by
 
 const visits = createResource({
   url: 'abm_crm.api.visits.get_visits',

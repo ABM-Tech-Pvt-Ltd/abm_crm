@@ -29,6 +29,7 @@ from frappe.utils import (
 from frappe.utils.password import set_encrypted_password
 
 from abm_crm.api.tags import attach_tags, doc_tags, names_with_tag
+from abm_crm.api.recordings import to_m4a
 from abm_crm.api.visits import get_visits, photo_url
 from abm_crm.setup.install import CALL_OUTCOMES
 
@@ -850,6 +851,8 @@ def upload_recording(call_log: str) -> dict:
 		frappe.throw(_("Send the recording as the file field"))
 	filename, content = upload
 	check_extension(filename, AUDIO_EXTENSIONS)
+	# browsers can't play AMR; older app versions upload it as is
+	filename, content = to_m4a(filename, content)
 	file = attach_file(filename, content, "CRM Call Log", log.name, "recording_url")
 	log.db_set("recording_url", file.file_url)
 	return {"recording_url": file.file_url}

@@ -216,7 +216,12 @@
           >
             <div class="flex items-center justify-stretch gap-2 text-base">
               <div class="inline-flex flex-wrap items-center gap-1.5 text-ink-gray-8">
-                <span class="font-medium">{{ activity.data.visited_by_name }}</span>
+                <span class="font-medium">{{
+                  (activity.data.visited_by_name !== activity.data.visited_by &&
+                    activity.data.visited_by_name) ||
+                  getUser(activity.data.visited_by)?.full_name ||
+                  activity.data.visited_by
+                }}</span>
                 <span class="text-ink-gray-5">{{ __('checked in') }}</span>
                 <span v-if="activity.data.address" class="text-ink-gray-7">
                   {{ __('at') }} {{ activity.data.address }}
