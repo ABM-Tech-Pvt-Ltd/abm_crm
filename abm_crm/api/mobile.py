@@ -1198,6 +1198,9 @@ def record_row(doc) -> dict:
 
 
 def record_title(doctype: str, name: str) -> str | None:
+	# a call / task / event can still point at a lead or deal that was deleted
+	if not name or not frappe.db.exists(doctype, name):
+		return None
 	if not frappe.has_permission(doctype, "read", name):
 		return None
 	if doctype == "CRM Lead":
