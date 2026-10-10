@@ -596,7 +596,8 @@ class TestBrandAndPassword(IntegrationTestCase):
 		update_password(email, "OldPass#2026x")
 		frappe.set_user(email)
 		try:
-			self.assertRaises(frappe.AuthenticationError, change_password, "wrong", "NewPass#2026y")
+			# ValidationError (417), not AuthenticationError: the app treats 401 as a dead session
+			self.assertRaises(frappe.ValidationError, change_password, "wrong", "NewPass#2026y")
 			change_password("OldPass#2026x", "NewPass#2026y-Strong")
 			self.assertEqual(check_password(email, "NewPass#2026y-Strong", delete_tracker_cache=False), email)
 		finally:

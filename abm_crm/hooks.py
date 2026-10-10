@@ -88,12 +88,9 @@ override_whitelisted_methods = {
 # }
 
 
-# Runtime fixes for upstream crm bugs (see abm_crm/monkey_patches.py). Runs once per process.
-try:
-	from abm_crm import monkey_patches as _abm_monkey_patches
-
-	_abm_monkey_patches.apply()
-except Exception:
-	import frappe
-
-	frappe.log_error("abm_crm monkey patches failed to apply")
+# Runtime fixes for upstream crm bugs (see abm_crm/monkey_patches.py).
+# Frappe caches hooks in Redis and imports this file only on a cache miss, so patching at import
+# time is not reliable. These hooks run in every web request and every background job instead;
+# the patch is idempotent.
+before_request = ["abm_crm.monkey_patches.apply"]
+before_job = ["abm_crm.monkey_patches.apply"]
