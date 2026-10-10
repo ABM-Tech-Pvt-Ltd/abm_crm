@@ -133,7 +133,9 @@ class TestMobileAPI(IntegrationTestCase):
 		self.assertEqual((outgoing.caller, outgoing.get("from"), outgoing.to), (REP, REP_NUMBER, LEAD_NUMBER))
 		self.assertEqual(outgoing.telephony_medium, "Manual")
 		self.assertEqual(outgoing.reference_doctype, "CRM Lead")
-		self.assertTrue(outgoing.has_link("CRM Lead", self.lead.name))
+		# referenced, not also linked: crm lists calls from both, so a link would show the call twice
+		self.assertEqual(outgoing.reference_docname, self.lead.name)
+		self.assertFalse(outgoing.has_link("CRM Lead", self.lead.name))
 
 		self.assertEqual((logs["abm-dev-a-2"].type, logs["abm-dev-a-2"].status), ("Incoming", "No Answer"))
 		self.assertEqual(logs["abm-dev-a-2"].receiver, REP)

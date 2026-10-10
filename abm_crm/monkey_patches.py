@@ -13,10 +13,11 @@ def apply(**_hook_kwargs) -> None:
 
 	`before_job` passes method, kwargs and transaction_type, which are ignored.
 	"""
-	try:
-		patch_facebook_blank_fields()
-	except Exception:
-		frappe.log_error(title="abm_crm monkey patch failed")
+	for patch in (patch_facebook_blank_fields, patch_duplicate_call_rows):
+		try:
+			patch()
+		except Exception:
+			frappe.log_error(title="abm_crm monkey patch failed")
 
 
 def patch_facebook_blank_fields() -> None:
@@ -28,8 +29,8 @@ def patch_facebook_blank_fields() -> None:
 	   the whole sync job. Fixed by dropping blank fields before crm parses the lead.
 	2. validate_duplicate_lead then reads lead_data[<every mapped crm field>] -> KeyError: 'email'.
 	   crm catches that and writes a Failed Lead Sync Log, so the lead is silently never created.
-	   Fixed by checking duplicates on Facebook's own lead id, plus the contact fields that are
-	   present.
+	   Fixed by checking duplicates on Facebook's own lead id only. People who submit twice are
+	   kept and tagged "Duplicate" (abm_crm.duplicates).
 	"""
 	try:
 		from crm.lead_syncing.doctype.lead_sync_source import facebook
@@ -43,24 +44,54 @@ def patch_facebook_blank_fields() -> None:
 	original_sync_single_lead = cls.sync_single_lead
 
 	def sync_single_lead(self, lead, raise_exception=False):
+		# the same Facebook submission comes back on every sync inside the re-check window; it is
+		# already in the CRM, so skip it quietly (crm would log a "Duplicate" entry each time)
+		if lead.get("id") and frappe.db.exists("CRM Lead", {"facebook_lead_id": lead["id"]}):
+			return None
 		field_data = [item for item in (lead.get("field_data") or []) if item.get("values")]
 		lead = {**lead, "field_data": field_data}
 		return original_sync_single_lead(self, lead, raise_exception=raise_exception)
 
 	def validate_duplicate_lead(self, lead_data: dict, field_mapping: dict):
-		# the Facebook lead id is unique per submission, so it is an exact duplicate check
+		# Only the exact same Facebook lead id is skipped. The same person submitting again (same
+		# phone number) is created and tagged "Duplicate" by abm_crm.duplicates, so it stays visible.
 		lead_id = lead_data.get("facebook_lead_id")
 		if lead_id and frappe.db.exists("CRM Lead", {"facebook_lead_id": lead_id}):
-			raise facebook.DuplicateLeadError
-
-		# same person re-submitting this form: match on the mapped fields that were filled in
-		filters = {f: lead_data[f] for f in field_mapping.values() if lead_data.get(f)}
-		if not set(filters) - {"first_name"}:
-			return  # only a name: too weak to call it a duplicate
-		filters["facebook_form_id"] = lead_data["facebook_form_id"]  # only for this campaign
-		if frappe.db.exists("CRM Lead", filters):
 			raise facebook.DuplicateLeadError
 
 	cls.sync_single_lead = sync_single_lead
 	cls.validate_duplicate_lead = validate_duplicate_lead
 	cls._abm_blank_fields_patched = True
+
+
+def patch_duplicate_call_rows() -> None:
+	"""crm shows a call twice on a lead or deal when the call is both referenced and linked to it.
+
+	get_linked_calls joins calls whose reference_docname is the record with calls that have a link to
+	the record, without removing repeats. Calls saved with both (older abm_crm call syncs did)
+	appear twice in the Calls tab and the activity feed. Remove repeats from the result.
+	"""
+	from functools import wraps
+
+	from crm.api import activities
+
+	if getattr(activities, "_abm_calls_deduped", False):
+		return
+
+	original = activities.get_linked_calls
+
+	@wraps(original)
+	def get_linked_calls(name: str):
+		result = original(name)
+		seen = set()
+		unique = []
+		for call in result.get("calls", []):
+			if call.get("name") in seen:
+				continue
+			seen.add(call.get("name"))
+			unique.append(call)
+		result["calls"] = unique
+		return result
+
+	activities.get_linked_calls = get_linked_calls
+	activities._abm_calls_deduped = True

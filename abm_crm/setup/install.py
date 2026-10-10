@@ -94,7 +94,7 @@ def setup_custom_fields():
 def get_custom_fields():
 	# Set "module": "Abm Crm" on each field so it is owned by this app.
 	return {
-		"CRM Lead": [*campaign_fields(), routing_rule_field()],
+		"CRM Lead": [*campaign_fields(), routing_rule_field(), phone_key_field()],
 		"CRM Deal": [*campaign_fields(), routing_rule_field()],
 		"CRM Call Log": [call_outcome_field()],
 		"Tag": tag_fields(),
@@ -189,6 +189,20 @@ def campaign_fields():
 			field["in_standard_filter"] = fieldname in ("abm_campaign", "abm_platform")
 		result.append(field)
 	return result
+
+
+def phone_key_field():
+	"""Last 10 digits of the lead's number, to find duplicate leads. See abm_crm/duplicates.py."""
+	return {
+		"fieldname": "abm_phone_key",
+		"label": "Phone Key",
+		"fieldtype": "Data",
+		"hidden": 1,
+		"read_only": 1,
+		"no_copy": 1,
+		"search_index": 1,
+		"module": "Abm Crm",
+	}
 
 
 def routing_rule_field():

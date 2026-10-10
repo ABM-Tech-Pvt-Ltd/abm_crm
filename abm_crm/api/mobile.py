@@ -841,9 +841,11 @@ def sync_call(call, ctx) -> dict:
 		}
 	)
 	if doctype in CRM_DOCTYPES:
+		# a call belongs to a lead/deal through its reference. Do not also add it to `links`: crm
+		# lists calls from both, so the call would show twice. Links are for notes, tasks and contacts.
 		doc.reference_doctype = doctype
 		doc.reference_docname = docname
-	if docname:
+	elif docname:
 		doc.link_with_reference_doc(doctype, docname)
 
 	try:

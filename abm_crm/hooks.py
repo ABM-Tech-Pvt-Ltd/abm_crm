@@ -34,7 +34,9 @@ doc_events = {
 		"validate": "abm_crm.api.email_account.sync_lead_creation",
 	},
 	"CRM Lead": {
+		"validate": "abm_crm.duplicates.set_phone_key",
 		"before_insert": "abm_crm.lead_routing.before_insert_lead",
+		"after_insert": "abm_crm.duplicates.tag_duplicate",
 	},
 	"CRM Deal": {
 		"before_insert": "abm_crm.lead_routing.before_insert_deal",

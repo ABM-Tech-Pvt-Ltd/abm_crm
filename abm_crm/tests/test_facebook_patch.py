@@ -52,3 +52,42 @@ class TestFacebookBlankFields(IntegrationTestCase):
 		apply()
 		apply()
 		self.assertIs(FacebookSyncSource.sync_single_lead, before)
+
+
+class TestFacebookDuplicates(IntegrationTestCase):
+	def setUp(self):
+		apply()
+
+	def tearDown(self):
+		for name in frappe.get_all("CRM Lead", filters={"facebook_lead_id": ["like", "TEST-FB-DUP-%"]}, pluck="name"):
+			frappe.delete_doc("CRM Lead", name, force=True, ignore_permissions=True)
+		for name in frappe.get_all("Failed Lead Sync Log", filters={"lead_data": ["like", "%TEST-FB-DUP-%"]}, pluck="name"):
+			frappe.delete_doc("Failed Lead Sync Log", name, force=True, ignore_permissions=True)
+		if not frappe.db.exists("Tag Link", {"tag": "Duplicate"}):
+			frappe.delete_doc("Tag", "Duplicate", force=True, ignore_permissions=True)
+
+	def lead(self, lead_id, phone):
+		return {
+			"id": lead_id,
+			"field_data": [
+				{"name": "full_name", "values": ["Facebook Dup Test"]},
+				{"name": "phone_number", "values": [phone]},
+				{"name": "email"},
+			],
+		}
+
+	def test_same_person_again_is_created_and_tagged_duplicate(self):
+		source = make_source()
+		first = source.sync_single_lead(self.lead("TEST-FB-DUP-1", "+919957200201"), raise_exception=True)
+		second = source.sync_single_lead(self.lead("TEST-FB-DUP-2", "09957200201"), raise_exception=True)
+		self.assertTrue(second)
+		self.assertNotEqual(first.name, second.name)
+		tags = (frappe.db.get_value("CRM Lead", second.name, "_user_tags") or "").lower()
+		self.assertIn("duplicate", tags)
+
+	def test_same_facebook_lead_is_skipped_without_a_log_entry(self):
+		source = make_source()
+		source.sync_single_lead(self.lead("TEST-FB-DUP-3", "+919957200301"), raise_exception=True)
+		self.assertIsNone(source.sync_single_lead(self.lead("TEST-FB-DUP-3", "+919957200301")))
+		self.assertEqual(frappe.db.count("CRM Lead", {"facebook_lead_id": "TEST-FB-DUP-3"}), 1)
+		self.assertFalse(frappe.db.exists("Failed Lead Sync Log", {"lead_data": ["like", "%TEST-FB-DUP-3%"]}))
