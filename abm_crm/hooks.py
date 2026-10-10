@@ -86,3 +86,14 @@ override_whitelisted_methods = {
 # extend_doctype_class = {
 # 	"CRM Lead": "abm_crm.overrides.crm_lead.CRMLeadMixin",
 # }
+
+
+# Runtime fixes for upstream crm bugs (see abm_crm/monkey_patches.py). Runs once per process.
+try:
+	from abm_crm import monkey_patches as _abm_monkey_patches
+
+	_abm_monkey_patches.apply()
+except Exception:
+	import frappe
+
+	frappe.log_error("abm_crm monkey patches failed to apply")
