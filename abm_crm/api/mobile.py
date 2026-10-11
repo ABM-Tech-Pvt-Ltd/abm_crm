@@ -1637,6 +1637,12 @@ def get_crm_doc(doctype: str, name: str):
 def record_row(doc) -> dict:
 	fields = LEAD_FIELDS if doc.doctype == "CRM Lead" else DEAL_FIELDS
 	row = {f: doc.get(f) for f in fields}
+	if doc.doctype == "CRM Deal" and not (row.get("mobile_no") and row.get("email")):
+		# a deal's number and email live on its contacts; use the primary one (else the first)
+		contacts = sorted(doc.get("contacts") or [], key=lambda c: not c.is_primary)
+		for c in contacts:
+			row["mobile_no"] = row.get("mobile_no") or c.mobile_no or c.phone
+			row["email"] = row.get("email") or c.email
 	row["tags"] = doc_tags(doc.doctype, doc.name)
 	return row
 

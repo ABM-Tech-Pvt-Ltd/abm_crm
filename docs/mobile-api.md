@@ -494,7 +494,7 @@ When a visit gets a person who is a user, that user gets a CRM Notification ("Si
   "by_status": [{"status": "Visited", "color": "green", "count": 0}],
   "by_user": [{"user": "a@b.com" | null, "name": "Display name", "user_image": null, "total": 0, "visited": 0,
                "scheduled": 0, "pending": 0, "postponed": 0, "cancelled": 0, "no_show": 0,
-               "as_closing_manager": 0, "as_attended_by": 0, "as_assistant": 0}],
+               "as_closing_manager": 0, "as_attended_by": 0, "as_assistant": 0, "as_rep": 1}],
   "by_project": [{"project": "Lodha Palava", "total": 0, "visited": 0, "booked": 0}],
   "by_type": [{"visit_type": "Site Visit", "count": 0}],
   "by_day": [{"date": "2026-10-12", "scheduled": 0, "visited": 0}],

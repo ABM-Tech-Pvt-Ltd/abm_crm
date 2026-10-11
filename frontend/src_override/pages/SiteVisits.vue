@@ -324,6 +324,7 @@ const userCols = [
   { key: 'as_closing_manager', label: 'As closing mgr' },
   { key: 'as_attended_by', label: 'As attended by' },
   { key: 'as_assistant', label: 'As assistant' },
+  { key: 'as_rep', label: 'Logged' },
 ]
 const groups = computed(() => [
   { title: 'Today', rows: d.value?.today || [], badge: 'bg-blue-50 text-blue-700' },

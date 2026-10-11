@@ -584,12 +584,24 @@ def visit_dashboard(
 
 
 def by_user(visits: list[dict]) -> list[dict]:
-	"""Per person: their visits by status and in each role. A person counts once per visit per role."""
-	roles = {"closing_manager": "as_closing_manager", "attended_by": "as_attended_by", "site_visit_assistant": "as_assistant"}
+	"""Per person: their visits by status and in each role. A person counts once per visit per role.
+
+	The rep who logged the visit (checked in, else created it) counts too, as `as_rep`, so visits
+	without named people still show up per person.
+	"""
+	roles = {
+		"closing_manager": "as_closing_manager",
+		"attended_by": "as_attended_by",
+		"site_visit_assistant": "as_assistant",
+		"rep": "as_rep",
+	}
 	people = {}
 	for v in visits:
 		for field, counter in roles.items():
-			user, name = v.get(f"{field}_user"), (v.get(field) or "").strip()
+			if field == "rep":
+				user, name = v.get("visited_by") or v.get("owner"), ""
+			else:
+				user, name = v.get(f"{field}_user"), (v.get(field) or "").strip()
 			if not user and not name:
 				continue
 			key = user or name.lower()
@@ -603,6 +615,7 @@ def by_user(visits: list[dict]) -> list[dict]:
 					"as_closing_manager": 0,
 					"as_attended_by": 0,
 					"as_assistant": 0,
+					"as_rep": 0,
 				},
 			)
 			entry[counter] += 1
@@ -643,6 +656,7 @@ def by_user(visits: list[dict]) -> list[dict]:
 				"as_closing_manager",
 				"as_attended_by",
 				"as_assistant",
+				"as_rep",
 			)
 		}
 		for p in result
