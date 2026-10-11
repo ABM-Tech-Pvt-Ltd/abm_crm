@@ -419,3 +419,198 @@ to a lead or deal.
 heic) is saved as a public file, like web profile photos, so other users can see it. The User record is saved
 without a permission check (Sales Users cannot write User records), and only the session user's own record and
 these three fields are changed.
+
+## v3: site visits, team report, lead info, idle-lead alerts, internal calls
+
+Shared by the web CRM and the mobile app. Visit and idle-alert methods live in their own modules and are
+called by path: `abm_crm.api.visits.<method>`, `abm_crm.api.idle_alerts.<method>`. Team report and call
+sync changes are in `abm_crm.api.mobile`. Same auth and permission rules as above; "manager" means System
+Manager or Sales Manager.
+
+### Site visits (walk-ins) as a lifecycle
+
+ABM Field Visit becomes a visit that is planned, held, postponed or cancelled. The existing check-in
+(GPS + photo) stays: it creates or completes a visit.
+
+**New fields on ABM Field Visit** (existing rows are migrated to status `Visited`, type `Site Visit`):
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | Select | `Pending`, `Scheduled`, `Visited`, `Postponed`, `Cancelled`, `No Show`. Default `Pending`; `Scheduled` when `scheduled_on` is given. |
+| `visit_type` | Select | `Site Visit` (default), `Walk-in`, `Office Meeting` |
+| `project` | Data | the project or property visited |
+| `scheduled_on` | Datetime | planned time. When postponed, the new time. |
+| `visited_at` | Datetime | existing: when the visit happened |
+| `status_reason` | Small Text | why it was cancelled, postponed or a no-show |
+| `outcome` | Select | after a visit: empty, `Interested`, `Needs Follow-up`, `Not Interested`, `Booked` |
+| `closing_manager`, `closing_manager_user` | Data, Link User | the person who closes the sale |
+| `attended_by`, `attended_by_user` | Data, Link User | the person who attended the visit |
+| `site_visit_assistant`, `site_visit_assistant_user` | Data, Link User | the assistant on site |
+| `notes`, `photo`, `latitude`, `longitude`, `accuracy`, `address`, `visited_by` | existing | `visited_by` is who recorded the visit |
+
+Each person is a **name** (`closing_manager`) plus an optional **system user** (`closing_manager_user`).
+The person need not be a CRM user: send only the name. When a user is sent, the name is filled from the
+user's full name. A user must be enabled.
+
+**Status rules** (enforced on save):
+- `Scheduled` and `Postponed` need `scheduled_on`.
+- `Visited` sets `visited_at` to now when empty.
+- `Cancelled`, `Postponed` and `No Show` keep `status_reason` (recommended, not required).
+- `Visited` and `Cancelled` are final except for a manager.
+
+**VisitRow:** `{name, status, status_color, visit_type, project, scheduled_on, visited_at, status_reason, outcome,
+closing_manager, closing_manager_user, closing_manager_name, attended_by, attended_by_user, attended_by_name,
+site_visit_assistant, site_visit_assistant_user, site_visit_assistant_name, notes, latitude, longitude, accuracy,
+address, map_url, photo_url, reference_doctype, reference_docname, reference_title, phone, visited_by,
+visited_by_name, owner, owner_name, creation, modified, visit_date}`. `*_name` is the display name (the user's
+full name or the typed name). `visit_date` is `scheduled_on`, else `visited_at`, else `creation`.
+`status_color` is a CRM color name: Pending gray, Scheduled blue, Visited green, Postponed orange,
+Cancelled red, No Show pink.
+
+| Method | Returns / does |
+|---|---|
+| `get_visit_options()` | `{statuses: [{name, color}], types: [str], outcomes: [str], projects: [str] (distinct projects used, plus tags in category Builder or Project), users: [{name, full_name, user_image}] (enabled CRM users)}` |
+| `list_visits(status=None, visit_type=None, user=None, project=None, date_from=None, date_to=None, search=None, reference_doctype=None, reference_docname=None, start=0, page_length=20, order_by="date")` | `{data: [VisitRow], has_more}`. `user` matches any of closing manager, attended by, assistant, visited_by, owner. Dates filter on `visit_date`. `search` matches project, names, lead title and phone. `order_by`: `date` (newest first), `upcoming` (soonest scheduled first). Only visits on records the user can read. |
+| `get_visit(name)` | VisitRow |
+| `create_visit(reference_doctype, reference_docname, data)` | VisitRow. `data` keys: status, visit_type, project, scheduled_on, status_reason, outcome, the three people (name and/or user), notes, latitude, longitude, accuracy, address, visited_at. Needs write permission on the lead or deal. |
+| `update_visit(name, data)` | VisitRow. Same keys. Checks the status rules. |
+| `delete_visit(name)` | The creator or a manager. |
+| `upload_visit_photo(name)` | Multipart `file` (image). Returns VisitRow. |
+| `visit_dashboard(date_from=None, date_to=None, user=None, project=None, visit_type=None)` | See below. Defaults to the current month. |
+| `get_visits(doctype, name)` | existing; rows are now VisitRows |
+
+Creating or changing a visit adds a comment on the lead or deal ("Site visit scheduled for 12 Oct, 4:00 PM
+at Lodha Palava", "Site visit postponed to ...", "Site visit completed"), so it shows in the activity feed.
+When a visit gets a person who is a user, that user gets a CRM Notification ("Site visit assigned: ...").
+
+**`visit_dashboard` result:**
+```json
+{ "range": {"date_from": "...", "date_to": "..."},
+  "totals": {"total": 0, "pending": 0, "scheduled": 0, "visited": 0, "postponed": 0, "cancelled": 0, "no_show": 0,
+             "today": 0, "upcoming_7d": 0, "overdue": 0, "booked": 0, "completion_rate": 0.0},
+  "by_status": [{"status": "Visited", "color": "green", "count": 0}],
+  "by_user": [{"user": "a@b.com" | null, "name": "Display name", "user_image": null, "total": 0, "visited": 0,
+               "scheduled": 0, "pending": 0, "postponed": 0, "cancelled": 0, "no_show": 0,
+               "as_closing_manager": 0, "as_attended_by": 0, "as_assistant": 0}],
+  "by_project": [{"project": "Lodha Palava", "total": 0, "visited": 0, "booked": 0}],
+  "by_type": [{"visit_type": "Site Visit", "count": 0}],
+  "by_day": [{"date": "2026-10-12", "scheduled": 0, "visited": 0}],
+  "today": [VisitRow], "upcoming": [VisitRow] (next 10 scheduled, soonest first),
+  "overdue": [VisitRow] (scheduled in the past, still Scheduled or Pending; max 10) }
+```
+`by_user` groups by system user when there is one, else by the typed name. A person counts once per visit per
+role. `overdue` and `upcoming` ignore the date range. `completion_rate` is visited / (visited + cancelled + no_show).
+`booked` counts visits whose `outcome` is `Booked`. Visits are counted by `visit_date` inside the range.
+
+### Mobile: visits, check-in
+`abm_crm.api.mobile.check_in(...)` now also accepts `visit` (an existing visit name): it completes that visit
+(status `Visited`, GPS, address, notes, optional photo) instead of creating one. Without `visit` it creates a new
+visit with status `Visited`, as before.
+
+### Team report (manager)
+
+| Method | Returns |
+|---|---|
+| `get_team_report(user=None, date_from=None, date_to=None, idle_hours=24)` | `{range, user: {name, full_name, user_image} \| null, summary: Summary, reps: [Summary + {user, full_name, user_image}] (only when user is null), by_status: [{status, color, count}], by_source: [{source, count}]}` |
+| `list_team_leads(user=None, status=None, search=None, idle_only=0, date_from=None, date_to=None, idle_hours=24, sort="idle", start=0, page_length=20)` | `{data: [TeamLead], has_more}` |
+
+`user` is a user id or None for the whole team. Non-managers always get their own data.
+
+**Summary:** `{leads_total, leads_open, leads_new, leads_contacted, leads_idle, leads_converted, calls, connected, missed,
+talk_time, visits_scheduled, visits_done, deals_created}`. `leads_total` and `leads_open` are all leads the user owns now;
+`leads_new`, `leads_contacted`, `leads_converted` and the call and visit numbers fall inside the date range.
+`leads_idle` is open leads with no activity for `idle_hours`. Open means the status type is Open or Ongoing.
+
+**TeamLead:** LeadRow + `{owner_name, tags, last_activity, last_contacted, idle_minutes, calls, last_call, visits,
+next_visit}`. `last_activity` is the latest of the lead's modified time, its latest call, comment and email.
+`last_contacted` is the latest call, email or WhatsApp. `idle_minutes` is wall-clock minutes since `last_activity`.
+`calls` and `visits` are counts for the lead in the date range. `sort`: `idle` (most idle first), `recent`
+(latest activity first), `created` (newest first).
+
+`list_leads` and `list_deals` already take `owner` as a user id; it keeps working.
+
+### Lead info (get_record)
+`get_record().doc` also has: `owner` (the user who created it), `owner_name`, `modified_by`, `modified_by_name`,
+`lead_owner_name` (or `deal_owner_name`), `last_activity`, `last_contacted`, `idle_minutes`. Each call in
+`get_record().calls` and in `list_calls` also has `rep` (the user whose phone made or took the call) and `rep_name`.
+
+### Internal calls are not logged
+`sync_calls` only logs calls with a **lead or deal**. It skips, and returns no call log for:
+- a number that belongs to a user of this CRM (their `mobile_no` or `phone`, compared on the last 10 digits): an
+  internal call;
+- a number that matches only a plain Contact (Frappe makes a Contact for every user), unless the CRM setting
+  `call_sync_scope` is "All calls". Internal numbers are skipped even then.
+
+Each sync result has `skip_reason`: `null` when logged, `internal`, or `no_match`. The app removes its own local
+recording of a skipped call.
+
+`cleanup_internal_call_logs(dry_run=1)` (manager, `abm_crm.api.mobile`) finds call logs already saved for internal
+numbers that are not on a lead or deal. With `dry_run=1` it returns `{count, names}`; with `dry_run=0` it deletes them
+and returns `{deleted}`.
+
+### Idle-lead alerts
+
+An admin defines **rules**: which lead statuses to watch, the working hours, and who to notify after how long. Idle
+time only counts inside working hours: with hours 10:30 to 19:30, a lead that arrives at 20:00 starts its idle clock at
+10:30 the next working day.
+
+**ABM Idle Lead Rule** doctype: `rule_name` (unique), `enabled`, `statuses` (table of CRM Lead Status), `work_start`
+(Time, default 10:30), `work_end` (Time, default 19:30), `mon` to `sun` (Check; Monday to Saturday on by default),
+`only_assigned` (Check: skip leads with no owner), `levels` (table: `idle_minutes` Int working minutes, `notify_owner`
+Check, `notify_user` Link User, `notify_role` Link Role, `message` Small Text, optional).
+
+A lead is idle for a rule when its status is in the rule's statuses and its **last activity** (latest of modified time,
+call, comment, email) was `idle_minutes` working minutes ago. Each level fires **once per idle period**: any new
+activity starts a new period. A scheduled job runs every 5 minutes. A level notifies the lead owner, the user, and every
+user with the role (once each). The notification is a CRM Notification of type `Automation` (shown in the web and the
+app, and pushed to phones): title "Idle lead: {lead name}", text "No activity for {n} min during working hours",
+pointing at the lead.
+
+**ABM Idle Lead Alert** doctype records each alert: `rule`, `lead`, `level` (the idle minutes), `activity_marker`
+(the last activity it was raised for), `sent_to` (users), `idle_minutes`, `creation`.
+
+| Method | Returns / does |
+|---|---|
+| `get_setup()` | `{rules: [Rule], statuses: [{name, color, type}], users: [{name, full_name}], roles: [str]}` (manager) |
+| `save_rule(rule)` | the rule name. `rule`: all rule fields; `statuses` as a list of status names; `levels` as a list of level objects. Renaming keeps history. |
+| `delete_rule(name)`, `set_rule_enabled(name, enabled)` | |
+| `preview_rule(rule)` | `{idle_now: n, leads: [{name, lead_name, owner_name, status, idle_minutes}] (max 20)}`: leads that would be alerted by a level right now; sends nothing |
+| `list_idle_leads(rule=None, user=None, start=0, page_length=20)` | `{data: [{name, lead_name, status, lead_owner, owner_name, idle_minutes, last_activity, rule, level}], has_more}`: leads currently idle, per rule |
+| `list_alerts(rule=None, lead=None, start=0, page_length=20)` | `{data: [Alert + lead_name, rule], has_more}` |
+| `run_now()` | manager only: runs the check once and returns `{alerts: n}` |
+
+### v3 implementation notes and deviations
+
+Where the contract above was open or the implementation differs:
+
+- **Visit rules.** `Visited` and `Cancelled` are final for non-managers only as to the *status* (other fields such as notes can still
+  be corrected). `visited_at` is set only for `Visited`; other statuses keep it empty. A non-manager cannot send `visited_at` in
+  `update_visit`; on create it is accepted only when recent (last 3 days), as for check-in. A typed name replaces the user for that
+  role (`closing_manager` sent without `closing_manager_user` clears the user); an empty user clears it.
+- **`visit_dashboard`.** `completion_rate` is a percentage (0 to 100, one decimal). `by_day.scheduled` counts visits that have a
+  `scheduled_on` (any status), `by_day.visited` counts status `Visited`, both grouped by `visit_date`. `today` is visits whose
+  `visit_date` is today (any status, up to 50). `upcoming` and `upcoming_7d` use status Scheduled, Pending or Postponed with
+  `scheduled_on` in the future; `overdue` uses Scheduled or Pending with `scheduled_on` in the past. `by_user` lists people by
+  closing manager, attended by and assistant only (not who recorded it); typed names group case-insensitively.
+  Non-managers only see visits on leads/deals they can read (lead/deal ids from `frappe.get_list`).
+- **Visit rows** also keep the old `visited_by_image`, and have `photo` (the raw file URL) next to `photo_url`. `check_in` returns a VisitRow.
+  The CRM Notification for an assigned person is type `Automation`: the title is in `message`
+  ("Site visit assigned: {lead}"), the details in `notification_text`. The push title for any `Automation` notification is its `message`.
+- **Team report.** Default range is today. Only leads that are not converted count (`converted = 0`, like the leads list). `leads_contacted`
+  is the number of owned leads with a call, email or WhatsApp inside the range. `leads_converted` is owned leads that got a deal created in
+  the range; `deals_created` is deals created in the range by `deal_owner`. `visits_scheduled` / `visits_done` count visits dated
+  (`visit_date`) in the range with status Scheduled/Pending, or Visited, where the user is any of the three people, the recorder or the creator.
+  `by_status` and `by_source` count leads created in the range (`source` empty: "Unknown"). `summary` for the whole team is the sum of `reps`
+  (enabled CRM users); leads without an owner are not in it. `TeamLead.owner_name` (and `lead_owner_name`) is the lead owner's name.
+  In `list_team_leads` the dates only limit `calls` and `visits` (no dates: all time); `last_call` is the latest call ever and
+  `next_visit` the soonest future Scheduled/Pending/Postponed visit. `sort=idle` puts Won and Lost leads last. `idle_only` keeps open leads only.
+- **Lead info.** `last_activity` also exists for deals (calls, comments and emails on the deal).
+- **Internal calls.** A number counts as internal when it is the mobile or phone of any enabled system user. Results always carry
+  `skip_reason` (also `no_match` for hidden numbers). `cleanup_internal_call_logs` looks at logs with no lead/deal and checks the other
+  party's number (`to` for outgoing, `from` for incoming).
+- **Idle alerts.** A rule with no statuses watches every Open/Ongoing status; Won/Lost statuses are watched only when listed. Converted leads are
+  skipped. When several levels were passed at the same time (a new rule, or the job was down), only the highest notifies; the lower ones are
+  logged as alerts with an empty `sent_to` so they do not fire later. `ABM Idle Lead Alert.lead` is a plain Data field (not a Link) so leads
+  can still be deleted. `delete_rule` also deletes the rule's alerts. `list_idle_leads` and `list_alerts` are open to any CRM user, who then
+  only sees their own leads; everything else is manager only. `get_setup().rules[]` use the `save_rule` shape plus `name` and `modified`
+  (`work_start`/`work_end` as `HH:MM:SS`, `statuses` as names). `save_rule` takes `name` to update or rename an existing rule.

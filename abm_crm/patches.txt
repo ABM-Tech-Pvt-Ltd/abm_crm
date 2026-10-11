@@ -7,3 +7,4 @@
 abm_crm.patches.v1_0.add_campaign_section_to_side_panel
 abm_crm.patches.v1_0.stop_email_leads_when_disabled
 abm_crm.patches.v1_1.backfill_phone_key
+abm_crm.patches.v1_2.migrate_field_visits

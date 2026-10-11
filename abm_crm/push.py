@@ -232,6 +232,9 @@ def notification_title(doc) -> str:
 		if doc.notification_type_doctype and doc.notification_type_doc and not still_assigned:
 			return "Assignment removed"
 		return ASSIGNMENT_TITLES.get(doc.notification_type_doctype, "New assignment")
+	if doc.type == "Automation" and strip_html(doc.message or "").strip():
+		# automations (idle-lead alerts, site visits) put their headline in the message
+		return re.sub(r"\s+", " ", unescape_html(strip_html(doc.message))).strip()[:100]
 	return NOTIFICATION_TITLES.get(doc.type, "ABM CRM")
 
 

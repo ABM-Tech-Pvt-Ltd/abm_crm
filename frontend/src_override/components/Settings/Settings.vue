@@ -87,6 +87,9 @@ import LucideAtSign from '~icons/lucide/at-sign'
 // abm_crm: campaign-based lead routing page
 import LeadRouting from '@/components/Settings/LeadRouting.vue'
 import LucideRoute from '~icons/lucide/route'
+// abm_crm: idle-lead alert rules
+import IdleLeadAlerts from '@/components/Settings/IdleLeadAlerts.vue'
+import LucideBellRing from '~icons/lucide/bell-ring'
 // abm_crm: Click to Chat WhatsApp templates
 import WhatsAppTemplates from '@/components/Settings/WhatsAppTemplates.vue'
 import Icon from '@/components/Icon.vue'
@@ -230,6 +233,12 @@ const tabs = computed(() => {
           label: __('Lead Routing'),
           icon: markRaw(LucideRoute),
           component: markRaw(LeadRouting),
+        },
+        // abm_crm: idle-lead alerts
+        {
+          label: __('Idle Lead Alerts'),
+          icon: markRaw(LucideBellRing),
+          component: markRaw(IdleLeadAlerts),
         },
         {
           label: __('SLA Policies'),

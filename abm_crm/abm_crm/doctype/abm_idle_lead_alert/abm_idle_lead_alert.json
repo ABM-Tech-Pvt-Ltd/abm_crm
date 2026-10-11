@@ -1,0 +1,89 @@
+{
+ "actions": [],
+ "creation": "2026-10-12 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "rule",
+  "lead",
+  "level",
+  "idle_minutes",
+  "activity_marker",
+  "sent_to"
+ ],
+ "fields": [
+  {
+   "fieldname": "rule",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Rule",
+   "options": "ABM Idle Lead Rule",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "lead",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Lead",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "level",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Level (idle minutes)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "idle_minutes",
+   "fieldtype": "Int",
+   "label": "Idle Minutes",
+   "read_only": 1
+  },
+  {
+   "fieldname": "activity_marker",
+   "fieldtype": "Datetime",
+   "label": "Activity Marker",
+   "read_only": 1,
+   "description": "The lead's last activity this alert was raised for"
+  },
+  {
+   "fieldname": "sent_to",
+   "fieldtype": "Small Text",
+   "label": "Sent To",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-10-12 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Abm Crm",
+ "name": "ABM Idle Lead Alert",
+ "owner": "Administrator",
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "hash",
+ "in_create": 1,
+ "description": "Log of idle-lead alerts that were raised",
+ "naming_rule": "Random",
+ "permissions": [
+  {
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  },
+  {
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager"
+  }
+ ]
+}

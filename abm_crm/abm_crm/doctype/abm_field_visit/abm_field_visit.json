@@ -2,14 +2,29 @@
  "actions": [],
  "autoname": "hash",
  "creation": "2026-10-04 12:00:00.000000",
- "description": "A rep's check-in at a lead or deal, sent from the mobile app",
+ "description": "A site visit, walk-in or meeting on a lead or deal: planned, held, postponed or cancelled",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
   "reference_doctype",
   "reference_docname",
+  "status",
+  "visit_type",
+  "project",
+  "scheduled_on",
+  "status_reason",
+  "outcome",
   "visited_by",
   "visited_at",
+  "section_break_people",
+  "closing_manager",
+  "closing_manager_user",
+  "attended_by",
+  "attended_by_user",
+  "column_break_people",
+  "site_visit_assistant",
+  "site_visit_assistant_user",
+  "section_break_loc",
   "column_break_loc",
   "latitude",
   "longitude",
@@ -43,12 +58,11 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "in_standard_filter": 1,
-   "label": "Visited By",
+   "label": "Recorded By",
    "options": "User",
    "search_index": 1
   },
   {
-   "default": "Now",
    "fieldname": "visited_at",
    "fieldtype": "Datetime",
    "in_list_view": 1,
@@ -95,10 +109,103 @@
    "fieldname": "photo",
    "fieldtype": "Attach Image",
    "label": "Photo"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Pending\nScheduled\nVisited\nPostponed\nCancelled\nNo Show",
+   "default": "Pending",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "visit_type",
+   "fieldtype": "Select",
+   "label": "Visit Type",
+   "options": "Site Visit\nWalk-in\nOffice Meeting",
+   "default": "Site Visit",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Data",
+   "label": "Project",
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "scheduled_on",
+   "fieldtype": "Datetime",
+   "label": "Scheduled On",
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "status_reason",
+   "fieldtype": "Small Text",
+   "label": "Status Reason"
+  },
+  {
+   "fieldname": "outcome",
+   "fieldtype": "Select",
+   "label": "Outcome",
+   "options": "\nInterested\nNeeds Follow-up\nNot Interested\nBooked"
+  },
+  {
+   "fieldname": "section_break_people",
+   "fieldtype": "Section Break",
+   "label": "People"
+  },
+  {
+   "fieldname": "closing_manager",
+   "fieldtype": "Data",
+   "label": "Closing Manager"
+  },
+  {
+   "fieldname": "closing_manager_user",
+   "fieldtype": "Link",
+   "label": "Closing Manager (User)",
+   "options": "User",
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_people",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "attended_by",
+   "fieldtype": "Data",
+   "label": "Attended By"
+  },
+  {
+   "fieldname": "attended_by_user",
+   "fieldtype": "Link",
+   "label": "Attended By (User)",
+   "options": "User",
+   "search_index": 1
+  },
+  {
+   "fieldname": "site_visit_assistant",
+   "fieldtype": "Data",
+   "label": "Site Visit Assistant"
+  },
+  {
+   "fieldname": "site_visit_assistant_user",
+   "fieldtype": "Link",
+   "label": "Site Visit Assistant (User)",
+   "options": "User",
+   "search_index": 1
+  },
+  {
+   "fieldname": "section_break_loc",
+   "fieldtype": "Section Break",
+   "label": "Location"
   }
  ],
  "links": [],
- "modified": "2026-10-04 12:00:00.000000",
+ "modified": "2026-10-12 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Abm Crm",
  "name": "ABM Field Visit",

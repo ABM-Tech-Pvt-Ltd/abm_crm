@@ -1,0 +1,178 @@
+{
+ "actions": [],
+ "creation": "2026-10-12 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "rule_name",
+  "enabled",
+  "section_statuses",
+  "statuses",
+  "only_assigned",
+  "section_hours",
+  "work_start",
+  "work_end",
+  "column_break_days",
+  "mon",
+  "tue",
+  "wed",
+  "thu",
+  "fri",
+  "sat",
+  "sun",
+  "section_levels",
+  "levels"
+ ],
+ "fields": [
+  {
+   "fieldname": "rule_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Rule Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "section_statuses",
+   "fieldtype": "Section Break",
+   "label": "Lead Statuses"
+  },
+  {
+   "description": "Leads in these statuses are watched. Leave empty for every open status. Won and Lost statuses are only watched when listed here.",
+   "fieldname": "statuses",
+   "fieldtype": "Table",
+   "label": "Statuses",
+   "options": "ABM Idle Lead Status"
+  },
+  {
+   "fieldname": "only_assigned",
+   "fieldtype": "Check",
+   "label": "Only Leads With an Owner"
+  },
+  {
+   "fieldname": "section_hours",
+   "fieldtype": "Section Break",
+   "label": "Working Hours"
+  },
+  {
+   "default": "10:30:00",
+   "fieldname": "work_start",
+   "fieldtype": "Time",
+   "label": "Work Start",
+   "reqd": 1
+  },
+  {
+   "default": "19:30:00",
+   "fieldname": "work_end",
+   "fieldtype": "Time",
+   "label": "Work End",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_days",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "mon",
+   "fieldtype": "Check",
+   "label": "Monday"
+  },
+  {
+   "default": "1",
+   "fieldname": "tue",
+   "fieldtype": "Check",
+   "label": "Tuesday"
+  },
+  {
+   "default": "1",
+   "fieldname": "wed",
+   "fieldtype": "Check",
+   "label": "Wednesday"
+  },
+  {
+   "default": "1",
+   "fieldname": "thu",
+   "fieldtype": "Check",
+   "label": "Thursday"
+  },
+  {
+   "default": "1",
+   "fieldname": "fri",
+   "fieldtype": "Check",
+   "label": "Friday"
+  },
+  {
+   "default": "1",
+   "fieldname": "sat",
+   "fieldtype": "Check",
+   "label": "Saturday"
+  },
+  {
+   "default": "0",
+   "fieldname": "sun",
+   "fieldtype": "Check",
+   "label": "Sunday"
+  },
+  {
+   "fieldname": "section_levels",
+   "fieldtype": "Section Break",
+   "label": "Alert Levels"
+  },
+  {
+   "fieldname": "levels",
+   "fieldtype": "Table",
+   "label": "Levels",
+   "options": "ABM Idle Lead Level",
+   "reqd": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-10-12 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Abm Crm",
+ "name": "ABM Idle Lead Rule",
+ "owner": "Administrator",
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "allow_rename": 1,
+ "autoname": "field:rule_name",
+ "description": "Alerts people when a lead has had no activity for a while during working hours",
+ "title_field": "rule_name",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "write": 1
+  }
+ ]
+}

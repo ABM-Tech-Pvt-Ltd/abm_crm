@@ -63,11 +63,12 @@ fixtures = [
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"cron": {
-# 		"0 9 * * *": ["abm_crm.tasks.daily_digest.send"],
-# 	},
-# }
+scheduler_events = {
+	"cron": {
+		# idle-lead alerts (see abm_crm/idle_alerts.py)
+		"*/5 * * * *": ["abm_crm.idle_alerts.run_check"],
+	},
+}
 
 # Overriding Methods
 # ------------------------------

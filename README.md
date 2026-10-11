@@ -63,6 +63,23 @@ ABM CRM is an add-on app. It never edits Frappe CRM's code, so you keep getting 
 - Lists: add the **Tags** column (column settings) to see the chips, and filter with
   Filter → **Tags** → like → `Lodha`.
 
+**Site visits**
+- The **Visits** tab on every lead and deal lists visits as cards: status chip (Pending, Scheduled, Visited,
+  Postponed, Cancelled, No Show), type (Site Visit, Walk-in, Office Meeting), project, scheduled and visited
+  time, the closing manager, attended by and site visit assistant, notes, photo and map link.
+- **Schedule visit** opens a form. Each person can be a CRM user or any typed name. Per card: Edit, Mark visited
+  (with outcome and notes), Postpone (new date and reason), Cancel, No show and Delete.
+- **Site Visits** in the sidebar (`/crm/site-visits`) is the manager's dashboard: totals, scheduled vs visited per
+  day, per-person and per-project tables, Today / Upcoming / Overdue lists, and the full list with filters
+  (status, type, person, project, date range, search). Click a visit to open its lead or deal.
+
+**Idle lead alerts**
+- Settings → Automation & Rules → **Idle Lead Alerts**. A rule picks the lead statuses to watch, the working
+  hours and days, and one or more levels: after N idle minutes notify the lead owner, a user and/or everyone with
+  a role. Idle time counts only inside working hours.
+- **Preview** shows which leads would be alerted right now without sending anything. The **Idle leads now** tab
+  lists leads that are idle at this moment, and **Alert history** lists the alerts sent.
+
 **Made for phones**
 - **Bottom navigation**: Leads, Deals, Tasks, Alerts, and More for everything else.
 - **Card lists** for leads and deals instead of tables that scroll sideways.
@@ -163,7 +180,8 @@ apps/abm_crm/
   files can also live there. Overrides stay small, so crm upgrades stay easy.
 - **Current overrides:**
   - `components/EmailEditor.vue` (sender picker)
-  - `components/Settings/Settings.vue` (adds Senders and Lead Routing)
+  - `components/Settings/Settings.vue` (adds Senders, Lead Routing and Idle Lead Alerts)
+  - `router.js` (adds the `/site-visits` route) and `utils/navigation.js` (Site Visits sidebar item)
   - `components/Settings/EmailAdd.vue` and `EmailEdit.vue` (real errors)
   - `composables/whatsapp.js` (WhatsApp mode, refreshes status)
   - `pages/Lead.vue`, `Deal.vue`, `MobileLead.vue`, `MobileDeal.vue` (call/WhatsApp/email buttons)
@@ -171,7 +189,8 @@ apps/abm_crm/
   - `components/ListViews/LeadsListView.vue` and `DealsListView.vue` (cards on phones)
   - `components/Layouts/MobileLayout.vue` and `components/Mobile/MobileAppHeader.vue` (bottom navigation)
 - **New components:**
-  - `components/Settings/EmailSenders.vue`, `LeadRouting.vue`, `WhatsAppTemplates.vue`
+  - `components/Settings/EmailSenders.vue`, `LeadRouting.vue`, `WhatsAppTemplates.vue`, `IdleLeadAlerts.vue`
+  - `pages/SiteVisits.vue`; `components/ABM/` visit components (`VisitCard`, `VisitModal`, `VisitActionDialog`, `PersonInput`, `visits.js`)
   - `components/ABM/` (`ContactActions`, `QuickWhatsApp`, `MobileRecordCards`)
   - `components/Mobile/MobileBottomNav.vue`
 

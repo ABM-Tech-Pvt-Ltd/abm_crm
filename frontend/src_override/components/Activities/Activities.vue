@@ -222,7 +222,12 @@
                   getUser(activity.data.visited_by)?.full_name ||
                   activity.data.visited_by
                 }}</span>
-                <span class="text-ink-gray-5">{{ __('checked in') }}</span>
+                <!-- abm_crm: visit status in the timeline -->
+                <span class="text-ink-gray-5">{{
+                  activity.data.status && activity.data.status !== 'Visited'
+                    ? __('site visit {0}', [__(activity.data.status).toLowerCase()])
+                    : __('checked in')
+                }}</span>
                 <span v-if="activity.data.address" class="text-ink-gray-7">
                   {{ __('at') }} {{ activity.data.address }}
                 </span>
@@ -700,7 +705,7 @@ const visitActivities = createResource({
     (rows || []).map((v) => ({
       name: 'visit-' + v.name,
       activity_type: 'field_visit',
-      creation: v.visited_at || v.creation,
+      creation: v.visited_at || v.scheduled_on || v.creation, // abm_crm: scheduled visits have no visited_at
       owner: v.visited_by,
       data: v,
     })),
@@ -710,6 +715,10 @@ watch(
   () => props.docname,
   () => visitActivities.reload(),
 )
+// abm_crm: the Visits tab changed a visit
+const reloadVisitActivities = () => visitActivities.reload()
+onMounted(() => window.addEventListener('abm-visits-changed', reloadVisitActivities))
+onBeforeUnmount(() => window.removeEventListener('abm-visits-changed', reloadVisitActivities))
 
 function get_activities() {
   if (!all_activities.data?.versions) return []

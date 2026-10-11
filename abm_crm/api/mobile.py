@@ -30,7 +30,11 @@ from frappe.utils.password import set_encrypted_password
 
 from abm_crm.api.tags import attach_tags, doc_tags, names_with_tag
 from abm_crm.api.recordings import to_m4a
-from abm_crm.api.visits import get_visits, photo_url
+from abm_crm.abm_crm.doctype.abm_field_visit.abm_field_visit import recent_or_now
+from abm_crm.activity import activity_times, idle_minutes
+from abm_crm.api.visits import get_row as get_visit_row
+from abm_crm.api.visits import get_visits
+from abm_crm.duplicates import phone_key
 from abm_crm.setup.install import CALL_OUTCOMES
 
 CRM_DOCTYPES = ("CRM Lead", "CRM Deal")
@@ -112,19 +116,6 @@ CALL_FIELDS = [
 	"reference_doctype",
 	"reference_docname",
 	"telephony_medium",
-]
-VISIT_FIELDS = [
-	"name",
-	"reference_doctype",
-	"reference_docname",
-	"latitude",
-	"longitude",
-	"accuracy",
-	"address",
-	"notes",
-	"photo",
-	"visited_by",
-	"visited_at",
 ]
 AUDIO_EXTENSIONS = (
 	"m4a",
@@ -502,6 +493,7 @@ def get_record(doctype: str, name: str) -> dict:
 	ref = {"reference_doctype": doctype, "reference_docname": name}
 	row = record_row(doc)
 	row.update({f: doc.get(f) for f in DETAIL_FIELDS})
+	row.update(lead_info(doc))
 
 	linked_calls = frappe.get_all(
 		"Dynamic Link",
@@ -529,16 +521,18 @@ def get_record(doctype: str, name: str) -> dict:
 		"tasks": frappe.get_all(
 			"CRM Task", filters=ref, fields=TASK_FIELDS, order_by="creation desc", limit=50
 		),
-		"calls": [
-			call_row(c)
-			for c in frappe.get_all(
-				"CRM Call Log",
-				or_filters=call_filters,
-				fields=CALL_FIELDS,
-				order_by="creation desc",
-				limit=50,
-			)
-		],
+		"calls": add_reps(
+			[
+				call_row(c)
+				for c in frappe.get_all(
+					"CRM Call Log",
+					or_filters=call_filters,
+					fields=CALL_FIELDS,
+					order_by="creation desc",
+					limit=50,
+				)
+			]
+		),
 		"comments": frappe.get_all(
 			"Comment",
 			filters={"reference_doctype": doctype, "reference_name": name, "comment_type": "Comment"},
@@ -763,6 +757,7 @@ def sync_calls(calls: list | str, device_id: str) -> list[dict]:
 		user_number=user_number,
 		all_calls=call_sync_scope() == "All calls",
 		upload=recordings_enabled(),
+		internal=internal_phone_keys(),
 	)
 	return [sync_call_safely(frappe._dict(c), context) for c in calls]
 
@@ -783,6 +778,7 @@ def sync_call_safely(call, ctx) -> dict:
 			"reference_docname": None,
 			"reference_title": None,
 			"upload_recording": False,
+			"skip_reason": None,
 			"error": str(e),
 		}
 
@@ -796,8 +792,10 @@ def sync_call(call, ctx) -> dict:
 		"reference_docname": None,
 		"reference_title": None,
 		"upload_recording": False,
+		"skip_reason": None,
 	}
 	if not device_call_id:
+		result["skip_reason"] = "no_match"
 		return result
 
 	call_id = f"abm-{ctx.device}-{device_call_id}"
@@ -808,9 +806,16 @@ def sync_call(call, ctx) -> dict:
 	number = str(call.number or "").strip()
 	if not validate_phone_number(number):
 		# hidden / private numbers
+		result["skip_reason"] = "no_match"
+		return result
+	if phone_key(number) in ctx.internal:
+		# a colleague's number: an internal call, never logged
+		result["skip_reason"] = "internal"
 		return result
 	docname, doctype = get_contact_lead_or_deal_from_number(number)
-	if not docname and not ctx.all_calls:
+	if doctype not in CRM_DOCTYPES and not ctx.all_calls:
+		# nothing, or only a plain Contact (Frappe makes one for every user)
+		result["skip_reason"] = "no_match"
 		return result
 
 	direction = str(call.type or "").lower()
@@ -854,6 +859,38 @@ def sync_call(call, ctx) -> dict:
 		# the same call sent twice at once
 		frappe.clear_messages()
 	return sync_result(result, get_synced_call(call_id), ctx)
+
+
+def internal_phone_keys() -> set[str]:
+	"""Last-10-digit keys of the mobile and phone numbers of the CRM's users."""
+	rows = frappe.get_all(
+		"User",
+		filters={"enabled": 1, "user_type": "System User", "name": ["not in", ("Administrator", "Guest")]},
+		fields=["mobile_no", "phone"],
+	)
+	return {k for r in rows for k in (phone_key(r.mobile_no), phone_key(r.phone)) if k}
+
+
+@frappe.whitelist(methods=["POST"])
+def cleanup_internal_call_logs(dry_run: int = 1) -> dict:
+	"""Call logs saved for a colleague's number that are not on a lead or deal. `dry_run=0` deletes them."""
+	frappe.only_for(MANAGER_ROLES)
+	internal = internal_phone_keys()
+	logs = frappe.get_all(
+		"CRM Call Log",
+		or_filters=[["reference_docname", "is", "not set"], ["reference_doctype", "not in", list(CRM_DOCTYPES)]],
+		fields=["name", "type", "from", "to"],
+	)
+	names = [
+		log.name
+		for log in logs
+		if phone_key(log.get("from") if log.type == "Incoming" else log.get("to")) in internal
+	]
+	if cint(dry_run):
+		return {"count": len(names), "names": names}
+	for name in names:
+		frappe.delete_doc("CRM Call Log", name, ignore_permissions=True, delete_permanently=True)
+	return {"deleted": len(names)}
 
 
 def get_synced_call(call_id: str):
@@ -930,7 +967,7 @@ def set_call_outcome(
 		).insert(ignore_permissions=True)
 		log.link_with_reference_doc("CRM Task", task.name)
 	log.save(ignore_permissions=True)
-	return call_row({f: log.get(f) for f in CALL_FIELDS})
+	return add_reps([call_row({f: log.get(f) for f in CALL_FIELDS})])[0]
 
 
 @frappe.whitelist()
@@ -983,9 +1020,11 @@ def check_in(
 	address: str | None = None,
 	notes: str | None = None,
 	visited_at: str | None = None,
+	visit: str | None = None,
 ) -> dict:
 	"""Record a visit to a lead or deal. An optional multipart `file` is saved as the photo.
 
+	With `visit` (an existing visit of this record) that visit is completed instead of a new one made.
 	`visited_at` is when the visit happened (a check-in made offline is sent later); the visit
 	controller only accepts a recent time and uses now otherwise.
 	"""
@@ -998,26 +1037,40 @@ def check_in(
 	if upload:
 		check_extension(upload[0], IMAGE_EXTENSIONS)
 
-	visit = frappe.get_doc(
-		{
-			"doctype": "ABM Field Visit",
-			"reference_doctype": reference_doctype,
-			"reference_docname": reference_docname,
-			"latitude": latitude,
-			"longitude": longitude,
-			"accuracy": flt(accuracy) if accuracy not in (None, "") else None,
-			"address": address,
-			"notes": notes,
-			"visited_by": frappe.session.user,
-			"visited_at": visited_at or now_datetime(),
-		}
-	).insert()
+	values = {
+		"status": "Visited",
+		"latitude": latitude,
+		"longitude": longitude,
+		"accuracy": flt(accuracy) if accuracy not in (None, "") else None,
+		"address": address,
+	}
+	if visit:
+		doc = frappe.get_doc("ABM Field Visit", visit)
+		if (doc.reference_doctype, doc.reference_docname) != (reference_doctype, reference_docname):
+			frappe.throw(_("This visit belongs to another record"))
+		frappe.get_doc(reference_doctype, reference_docname).check_permission("write")
+		if doc.status != "Visited":
+			doc.visited_at = recent_or_now(visited_at)
+		doc.update(values)
+		if notes:
+			doc.notes = notes
+		doc.save(ignore_permissions=True)
+	else:
+		doc = frappe.get_doc(
+			{
+				"doctype": "ABM Field Visit",
+				"reference_doctype": reference_doctype,
+				"reference_docname": reference_docname,
+				"notes": notes,
+				"visited_by": frappe.session.user,
+				"visited_at": visited_at or now_datetime(),
+				**values,
+			}
+		).insert()
 	if upload:
-		file = attach_file(upload[0], upload[1], "ABM Field Visit", visit.name, "photo")
-		visit.db_set("photo", file.file_url)
-	row = {f: visit.get(f) for f in VISIT_FIELDS}
-	row["photo_url"] = photo_url(visit.name) if visit.photo else None
-	return row
+		file = attach_file(upload[0], upload[1], "ABM Field Visit", doc.name, "photo")
+		frappe.db.set_value("ABM Field Visit", doc.name, "photo", file.file_url)
+	return get_visit_row(doc.name)
 
 
 # Manager dashboard
@@ -1136,6 +1189,312 @@ def manager_dashboard(date_from: str | None = None, date_to: str | None = None) 
 	}
 
 
+# Lead info
+# ---------
+
+
+def lead_info(doc) -> dict:
+	"""Who created and last changed a lead or deal, its owner's name, and how long it has been idle."""
+	owner_field = "lead_owner" if doc.doctype == "CRM Lead" else "deal_owner"
+	users = {u for u in (doc.owner, doc.modified_by, doc.get(owner_field)) if u}
+	names = dict(
+		frappe.get_all("User", filters={"name": ["in", list(users)]}, fields=["name", "full_name"], as_list=True)
+	)
+
+	def name_of(user):
+		return (names.get(user) or user) if user else None
+
+	last_activity, last_contacted = activity_times(doc.doctype, {doc.name: doc.modified})[doc.name]
+	return {
+		"owner": doc.owner,
+		"owner_name": name_of(doc.owner),
+		"modified_by": doc.modified_by,
+		"modified_by_name": name_of(doc.modified_by),
+		f"{owner_field}_name": name_of(doc.get(owner_field)),
+		"last_activity": last_activity,
+		"last_contacted": last_contacted,
+		"idle_minutes": idle_minutes(last_activity, now_datetime()),
+	}
+
+
+# Team report (manager)
+# ---------------------
+
+OPEN_LEAD_STATUS_TYPES = ("Open", "Ongoing")
+SUMMARY_KEYS = (
+	"leads_total",
+	"leads_open",
+	"leads_new",
+	"leads_contacted",
+	"leads_idle",
+	"leads_converted",
+	"calls",
+	"connected",
+	"missed",
+	"talk_time",
+	"visits_scheduled",
+	"visits_done",
+	"deals_created",
+)
+VISIT_PLANNED = ("Scheduled", "Pending")
+
+
+def report_user(user: str | None) -> str | None:
+	"""A manager may look at any user or the whole team (None); anyone else only at themselves."""
+	return (user or None) if is_manager() else frappe.session.user
+
+
+def report_range(date_from, date_to) -> tuple[datetime.datetime, datetime.datetime]:
+	return day_start(date_from or nowdate()), add_days(day_start(date_to or date_from or nowdate()), 1)
+
+
+@frappe.whitelist()
+@formatted
+def get_team_report(
+	user: str | None = None,
+	date_from: str | None = None,
+	date_to: str | None = None,
+	idle_hours: float = 24,
+) -> dict:
+	"""Numbers for one rep or the whole team between two dates (default today)."""
+	user = report_user(user)
+	start, end = report_range(date_from, date_to)
+	now = now_datetime()
+	person = None
+	if user:
+		person = frappe.db.get_value("User", user, ["name", "full_name", "user_image"], as_dict=True)
+		if not person:
+			frappe.throw(_("User {0} not found").format(user))
+	team = [person] if person else crm_users()
+	summaries = team_summaries([u.name for u in team], start, end, flt(idle_hours) or 24, now)
+
+	owner = "and lead_owner = %(user)s" if user else ""
+	values = {"start": start, "end": end, "user": user}
+	by_status = dict(
+		frappe.db.sql(
+			f"""select status, count(*) from `tabCRM Lead`
+			where converted = 0 and creation >= %(start)s and creation < %(end)s {owner} group by status""",
+			values,
+		)
+	)
+	by_source = frappe.db.sql(
+		f"""select ifnull(nullif(source, ''), 'Unknown'), count(*) from `tabCRM Lead`
+		where converted = 0 and creation >= %(start)s and creation < %(end)s {owner}
+		group by 1 order by 2 desc, 1""",
+		values,
+	)
+	if person:
+		summary = summaries[person.name]
+	else:
+		summary = {k: sum(s[k] for s in summaries.values()) for k in SUMMARY_KEYS}
+	return {
+		"range": {"date_from": start.date().isoformat(), "date_to": add_days(end, -1).date().isoformat()},
+		"user": person and {"name": person.name, "full_name": person.full_name, "user_image": person.user_image},
+		"summary": summary,
+		"reps": []
+		if person
+		else [
+			{**summaries[u.name], "user": u.name, "full_name": u.full_name, "user_image": u.user_image}
+			for u in team
+		],
+		"by_status": [
+			{"status": s.name, "color": s.color, "count": cint(by_status.get(s.name))}
+			for s in get_statuses("CRM Lead Status")
+		],
+		"by_source": [{"source": source, "count": cint(n)} for source, n in by_source],
+	}
+
+
+def team_summaries(users: list[str], start, end, idle_hours: float, now) -> dict[str, dict]:
+	"""Summary per user (see docs/mobile-api.md). One grouped query per number."""
+	out = {u: dict.fromkeys(SUMMARY_KEYS, 0) for u in users}
+	if not users:
+		return out
+	values = {"users": tuple(users), "start": start, "end": end}
+
+	for owner, total, new in frappe.db.sql(
+		"""select lead_owner, count(*), sum(case when creation >= %(start)s and creation < %(end)s then 1 else 0 end)
+		from `tabCRM Lead` where converted = 0 and lead_owner in %(users)s group by lead_owner""",
+		values,
+	):
+		out[owner]["leads_total"], out[owner]["leads_new"] = cint(total), cint(new)
+
+	open_leads = frappe.db.sql(
+		"""select l.lead_owner, l.name, l.modified from `tabCRM Lead` l
+		join `tabCRM Lead Status` s on s.name = l.status
+		where l.converted = 0 and s.type in %(open_types)s and l.lead_owner in %(users)s""",
+		{**values, "open_types": OPEN_LEAD_STATUS_TYPES},
+	)
+	times = activity_times("CRM Lead", {name: modified for _o, name, modified in open_leads})
+	limit = idle_hours * 60
+	for owner, name, _modified in open_leads:
+		out[owner]["leads_open"] += 1
+		if idle_minutes(times[name][0], now) >= limit:
+			out[owner]["leads_idle"] += 1
+
+	for owner, n in frappe.db.sql(
+		"""select l.lead_owner, count(*) from `tabCRM Lead` l join (
+			select reference_docname as lead from `tabCRM Call Log`
+				where reference_doctype = 'CRM Lead' and start_time >= %(start)s and start_time < %(end)s
+			union select reference_name from `tabCommunication`
+				where reference_doctype = 'CRM Lead' and communication_type = 'Communication'
+				and communication_date >= %(start)s and communication_date < %(end)s
+			union select reference_name from `tabABM WhatsApp Log`
+				where reference_doctype = 'CRM Lead' and creation >= %(start)s and creation < %(end)s
+		) t on t.lead = l.name where l.converted = 0 and l.lead_owner in %(users)s group by l.lead_owner""",
+		values,
+	):
+		out[owner]["leads_contacted"] = cint(n)
+
+	for owner, n in frappe.db.sql(
+		"""select l.lead_owner, count(distinct l.name) from `tabCRM Lead` l
+		join `tabCRM Deal` d on d.lead = l.name
+		where l.lead_owner in %(users)s and d.creation >= %(start)s and d.creation < %(end)s
+		group by l.lead_owner""",
+		values,
+	):
+		out[owner]["leads_converted"] = cint(n)
+
+	for owner, n in frappe.db.sql(
+		"""select deal_owner, count(*) from `tabCRM Deal`
+		where deal_owner in %(users)s and creation >= %(start)s and creation < %(end)s group by deal_owner""",
+		values,
+	):
+		out[owner]["deals_created"] = cint(n)
+
+	for row in call_stats(start, end, group=True):
+		if row["user"] in out:
+			out[row["user"]].update(
+				calls=row["count"], connected=row["connected"], missed=row["missed"], talk_time=row["talk_time"]
+			)
+
+	visits = frappe.db.sql(
+		"""select status, closing_manager_user, attended_by_user, site_visit_assistant_user, visited_by, owner
+		from `tabABM Field Visit` v
+		where coalesce(scheduled_on, visited_at, creation) >= %(start)s
+		and coalesce(scheduled_on, visited_at, creation) < %(end)s""",
+		values,
+		as_dict=True,
+	)
+	for v in visits:
+		people = {v.closing_manager_user, v.attended_by_user, v.site_visit_assistant_user, v.visited_by, v.owner}
+		for person in people & set(users):
+			if v.status in VISIT_PLANNED:
+				out[person]["visits_scheduled"] += 1
+			elif v.status == "Visited":
+				out[person]["visits_done"] += 1
+	return out
+
+
+@frappe.whitelist()
+@formatted
+def list_team_leads(
+	user: str | None = None,
+	status: str | None = None,
+	search: str | None = None,
+	idle_only: int = 0,
+	date_from: str | None = None,
+	date_to: str | None = None,
+	idle_hours: float = 24,
+	sort: str = "idle",
+	start: int = 0,
+	page_length: int = 20,
+) -> dict:
+	"""Lead-wise report: each lead with its last activity, idle time, calls and visits."""
+	user = report_user(user)
+	now = now_datetime()
+	start, page_length = max(cint(start), 0), min(max(cint(page_length) or 20, 1), 100)
+	filters = {"converted": 0}
+	if user:
+		filters["lead_owner"] = user
+	if status:
+		filters["status"] = status
+	search = (search or "").strip()
+	leads = frappe.get_all(
+		"CRM Lead",
+		filters=filters,
+		or_filters=[[f, "like", f"%{search}%"] for f in SEARCH_FIELDS] if search else None,
+		fields=[*LEAD_FIELDS, "_user_tags"],
+	)
+	types = {s.name: s.type for s in get_statuses("CRM Lead Status")}
+	times = activity_times("CRM Lead", {lead.name: lead.modified for lead in leads})
+	limit = flt(idle_hours or 24) * 60
+	rows = []
+	for lead in leads:
+		last_activity, last_contacted = times[lead.name]
+		row = dict(lead)
+		row.update(
+			last_activity=last_activity,
+			last_contacted=last_contacted,
+			idle_minutes=idle_minutes(last_activity, now),
+			is_closed=types.get(lead.status) in CLOSED_STATUS_TYPES,
+		)
+		if cint(idle_only) and (row["is_closed"] or row["idle_minutes"] < limit):
+			continue
+		rows.append(row)
+
+	if sort == "recent":
+		rows.sort(key=lambda r: r["last_activity"] or datetime.datetime.min, reverse=True)
+	elif sort == "created":
+		rows.sort(key=lambda r: r["creation"], reverse=True)
+	else:
+		# most idle first; won and lost leads are not idle, they go last
+		rows.sort(key=lambda r: (r["is_closed"], -(r["idle_minutes"] or 0)))
+	page = rows[start : start + page_length]
+	attach_tags(page)
+	add_lead_counts(page, date_from, date_to, now)
+	return {"data": page, "has_more": start + page_length < len(rows)}
+
+
+def add_lead_counts(rows: list[dict], date_from, date_to, now) -> None:
+	"""Owner name, calls, last call, visits and next visit for one page of leads."""
+	if date_from or date_to:
+		range_start, range_end = report_range(date_from or date_to, date_to or date_from)
+	else:
+		range_start, range_end = datetime.datetime(1970, 1, 1), datetime.datetime(2100, 1, 1)
+	names = [r["name"] for r in rows]
+	owners = {r["lead_owner"] for r in rows if r.get("lead_owner")}
+	full_names = (
+		dict(frappe.get_all("User", filters={"name": ["in", list(owners)]}, fields=["name", "full_name"], as_list=True))
+		if owners
+		else {}
+	)
+	if not names:
+		return
+	values = {"names": tuple(names), "start": range_start, "end": range_end, "now": now}
+	calls = {
+		name: (cint(n), last)
+		for name, n, last in frappe.db.sql(
+			"""select reference_docname,
+				sum(case when coalesce(start_time, creation) >= %(start)s and coalesce(start_time, creation) < %(end)s
+					then 1 else 0 end),
+				max(coalesce(start_time, creation))
+			from `tabCRM Call Log` where reference_doctype = 'CRM Lead' and reference_docname in %(names)s
+			group by reference_docname""",
+			values,
+		)
+	}
+	visits = {
+		name: (cint(n), nxt)
+		for name, n, nxt in frappe.db.sql(
+			"""select reference_docname,
+				sum(case when coalesce(scheduled_on, visited_at, creation) >= %(start)s
+					and coalesce(scheduled_on, visited_at, creation) < %(end)s then 1 else 0 end),
+				min(case when status in ('Scheduled', 'Pending', 'Postponed') and scheduled_on >= %(now)s
+					then scheduled_on end)
+			from `tabABM Field Visit` where reference_doctype = 'CRM Lead' and reference_docname in %(names)s
+			group by reference_docname""",
+			values,
+		)
+	}
+	for row in rows:
+		row.pop("is_closed", None)
+		owner = row.get("lead_owner")
+		row["owner_name"] = row["lead_owner_name"] = (full_names.get(owner) or owner) if owner else None
+		row["calls"], row["last_call"] = calls.get(row["name"], (0, None))
+		row["visits"], row["next_visit"] = visits.get(row["name"], (0, None))
+
+
 # Helpers
 # -------
 
@@ -1218,6 +1577,7 @@ def task_row(task) -> dict:
 def call_row(call: dict) -> dict:
 	call = dict(call)
 	call["duration"] = cint(call.get("duration"))
+	call["rep"] = call.get("caller") if call.get("type") == "Outgoing" else call.get("receiver")
 	url = call.get("recording_url")
 	if not url:
 		call["recording_url_path"] = None
@@ -1230,22 +1590,29 @@ def call_row(call: dict) -> dict:
 	return call
 
 
+def add_reps(rows: list[dict]) -> list[dict]:
+	"""Set `rep_name` (and `user_full_name`) on call rows that have `rep`, with one user query."""
+	users = {r.get("rep") for r in rows if r.get("rep")}
+	names = (
+		dict(frappe.get_all("User", filters={"name": ["in", list(users)]}, fields=["name", "full_name"], as_list=True))
+		if users
+		else {}
+	)
+	for r in rows:
+		r["rep_name"] = names.get(r.get("rep")) or r.get("rep")
+		r["user_full_name"] = names.get(r.get("rep"))
+	return rows
+
+
 def enrich_calls(calls: list[dict]) -> list[dict]:
 	"""Call rows plus the rep's full name and the lead/deal title."""
-	names = {}
-	rows = []
-	for c in calls:
-		row = call_row(c)
-		user = row.get("caller") if row.get("type") == "Outgoing" else row.get("receiver")
-		if user and user not in names:
-			names[user] = frappe.db.get_value("User", user, "full_name")
-		row["user_full_name"] = names.get(user)
+	rows = add_reps([call_row(c) for c in calls])
+	for row in rows:
 		row["reference_title"] = (
 			record_title(row["reference_doctype"], row["reference_docname"])
 			if row.get("reference_doctype") in CRM_DOCTYPES and row.get("reference_docname")
 			else None
 		)
-		rows.append(row)
 	return rows
 
 
