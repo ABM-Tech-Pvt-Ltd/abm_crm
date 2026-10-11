@@ -13,9 +13,11 @@ import frappe
 import phonenumbers
 from crm.integrations.api import get_contact_lead_or_deal_from_number
 from frappe import _
+from frappe.query_builder import Criterion, Order
 from frappe.rate_limiter import rate_limit
 from frappe.utils import (
 	add_days,
+	add_to_date,
 	cint,
 	convert_utc_to_system_timezone,
 	escape_html,
@@ -482,7 +484,32 @@ def list_records(doctype, search, status, owner, start, page_length, order_by, t
 		page_length=page_length,
 	)
 	attach_tags(result["data"])
+	owner_field = "lead_owner" if is_lead else "deal_owner"
+	add_user_names(result["data"], owner_field, f"{owner_field}_name")
+	if not cint(start):
+		# with the first page only: the app shows it as the list's size
+		rows = frappe.get_list(
+			doctype, filters=filters, or_filters=or_filters, fields=[{"COUNT": "*", "as": "n"}], order_by=None
+		)
+		result["total"] = cint(rows[0].n) if rows else 0
 	return result
+
+
+def add_user_names(rows: list[dict], field: str, name_field: str) -> list[dict]:
+	"""Set `name_field` to the full name of the user in `field`, with one User query."""
+	users = {r.get(field) for r in rows if r.get(field)}
+	names = (
+		dict(
+			frappe.get_all(
+				"User", filters={"name": ["in", list(users)]}, fields=["name", "full_name"], as_list=True
+			)
+		)
+		if users
+		else {}
+	)
+	for r in rows:
+		r[name_field] = names.get(r.get(field)) or r.get(field)
+	return rows
 
 
 @frappe.whitelist()
@@ -1124,15 +1151,11 @@ def manager_dashboard(date_from: str | None = None, date_to: str | None = None) 
 			(CLOSED_TASK_STATUSES, now),
 		)
 	)
-	last_calls = dict(
-		frappe.db.sql(
-			"""select case when type = 'Outgoing' then caller else receiver end as user, max(start_time)
-			from `tabCRM Call Log` group by 1"""
-		)
-	)
+	users = crm_users()
+	last_calls = last_call_times([u.name for u in users])
 
 	reps = []
-	for u in crm_users():
+	for u in users:
 		s = stats.get(u.name) or {}
 		reps.append(
 			{
@@ -1191,6 +1214,23 @@ def manager_dashboard(date_from: str | None = None, date_to: str | None = None) 
 
 # Lead info
 # ---------
+
+
+def last_call_times(users: list[str]) -> dict:
+	"""{user: start of their last call}. Per column (outgoing: caller, incoming: receiver) and only for
+	`users`, so the (caller / receiver, start_time) indexes answer it instead of a scan of every call."""
+	last = {}
+	if not users:
+		return last
+	for column, condition in (("caller", "type = 'Outgoing'"), ("receiver", "ifnull(type, '') != 'Outgoing'")):
+		for user, at in frappe.db.sql(
+			f"""select `{column}`, max(start_time) from `tabCRM Call Log`
+			where `{column}` in %(users)s and {condition} group by `{column}`""",
+			{"users": users},
+		):
+			if at and (user not in last or at > last[user]):
+				last[user] = at
+	return last
 
 
 def lead_info(doc) -> dict:
@@ -1400,28 +1440,68 @@ def list_team_leads(
 	start: int = 0,
 	page_length: int = 20,
 ) -> dict:
-	"""Lead-wise report: each lead with its last activity, idle time, calls and visits."""
+	"""Lead-wise report: each lead with its last activity, idle time, calls and visits.
+
+	Sorting, the idle filter and paging run in SQL, so only one page of leads is loaded however many
+	leads there are. Last activity is computed per lead with indexed subqueries (see LAST_ACTIVITY_SQL).
+	"""
 	user = report_user(user)
 	now = now_datetime()
 	start, page_length = max(cint(start), 0), min(max(cint(page_length) or 20, 1), 100)
-	filters = {"converted": 0}
+	conditions = ["l.converted = 0"]
+	values = {
+		"user": user,
+		"status": status,
+		"closed": tuple(closed_statuses("CRM Lead Status")),
+		"idle_before": add_to_date(now, minutes=-flt(idle_hours or 24) * 60),
+		"start": start,
+		"limit": page_length + 1,
+	}
 	if user:
-		filters["lead_owner"] = user
+		conditions.append("l.lead_owner = %(user)s")
 	if status:
-		filters["status"] = status
+		conditions.append("l.status = %(status)s")
 	search = (search or "").strip()
-	leads = frappe.get_all(
-		"CRM Lead",
-		filters=filters,
-		or_filters=[[f, "like", f"%{search}%"] for f in SEARCH_FIELDS] if search else None,
-		fields=[*LEAD_FIELDS, "_user_tags"],
+	if search:
+		values["search"] = f"%{search}%"
+		conditions.append("(" + " or ".join(f"l.`{f}` like %(search)s" for f in SEARCH_FIELDS) + ")")
+	having = ""
+	if cint(idle_only):
+		having = "having is_closed = 0 and last_activity <= %(idle_before)s"
+	order = {
+		"recent": "last_activity desc",
+		"created": "l.creation desc",
+	}.get(sort, "is_closed asc, last_activity asc")  # most idle first; won and lost leads go last
+
+	found = frappe.db.sql(
+		f"""select l.name, {LAST_ACTIVITY_SQL} as last_activity, l.status in %(closed)s as is_closed
+		from `tabCRM Lead` l
+		where {" and ".join(conditions)}
+		{having}
+		order by {order}, l.name
+		limit %(limit)s offset %(start)s""",
+		values,
+		as_dict=True,
 	)
+	has_more = len(found) > page_length
+	names = [r.name for r in found[:page_length]]
+	if not names:
+		return {"data": [], "has_more": False}
+
+	by_name = {
+		lead.name: lead
+		for lead in frappe.get_all(
+			"CRM Lead", filters={"name": ["in", names]}, fields=[*LEAD_FIELDS, "_user_tags"]
+		)
+	}
 	types = {s.name: s.type for s in get_statuses("CRM Lead Status")}
-	times = activity_times("CRM Lead", {lead.name: lead.modified for lead in leads})
-	limit = flt(idle_hours or 24) * 60
-	rows = []
-	for lead in leads:
-		last_activity, last_contacted = times[lead.name]
+	times = activity_times("CRM Lead", {name: by_name[name].modified for name in names if name in by_name})
+	page = []
+	for name in names:
+		lead = by_name.get(name)
+		if not lead:
+			continue
+		last_activity, last_contacted = times[name]
 		row = dict(lead)
 		row.update(
 			last_activity=last_activity,
@@ -1429,21 +1509,24 @@ def list_team_leads(
 			idle_minutes=idle_minutes(last_activity, now),
 			is_closed=types.get(lead.status) in CLOSED_STATUS_TYPES,
 		)
-		if cint(idle_only) and (row["is_closed"] or row["idle_minutes"] < limit):
-			continue
-		rows.append(row)
-
-	if sort == "recent":
-		rows.sort(key=lambda r: r["last_activity"] or datetime.datetime.min, reverse=True)
-	elif sort == "created":
-		rows.sort(key=lambda r: r["creation"], reverse=True)
-	else:
-		# most idle first; won and lost leads are not idle, they go last
-		rows.sort(key=lambda r: (r["is_closed"], -(r["idle_minutes"] or 0)))
-	page = rows[start : start + page_length]
+		page.append(row)
 	attach_tags(page)
 	add_lead_counts(page, date_from, date_to, now)
-	return {"data": page, "has_more": start + page_length < len(rows)}
+	return {"data": page, "has_more": has_more}
+
+
+# The latest of a lead's modified time, its latest call, comment and email (as abm_crm.activity),
+# computed in SQL so leads can be sorted by it. Each subquery uses the reference indexes.
+LAST_ACTIVITY_SQL = """greatest(
+	l.modified,
+	coalesce((select max(coalesce(c.start_time, c.creation)) from `tabCRM Call Log` c
+		where c.reference_doctype = 'CRM Lead' and c.reference_docname = l.name), l.modified),
+	coalesce((select max(m.creation) from `tabComment` m
+		where m.reference_doctype = 'CRM Lead' and m.reference_name = l.name and m.comment_type = 'Comment'), l.modified),
+	coalesce((select max(coalesce(e.communication_date, e.creation)) from `tabCommunication` e
+		where e.reference_doctype = 'CRM Lead' and e.reference_name = l.name
+		and e.communication_type = 'Communication'), l.modified)
+)"""
 
 
 def add_lead_counts(rows: list[dict], date_from, date_to, now) -> None:
@@ -1570,6 +1653,26 @@ def record_title(doctype: str, name: str) -> str | None:
 	return org or lead_name
 
 
+def record_titles(refs) -> dict:
+	"""`record_title` for many (doctype, name) pairs, with one query per doctype.
+
+	Returns {(doctype, name): title}; deleted records and ones the user cannot read are left out.
+	"""
+	refs = {(d, n) for d, n in refs if d in CRM_DOCTYPES and n}
+	titles = {}
+	for doctype in CRM_DOCTYPES:
+		names = [n for d, n in refs if d == doctype]
+		if not names:
+			continue
+		fields = ["name", "lead_name"] + (["organization"] if doctype == "CRM Deal" else [])
+		for r in frappe.get_list(
+			doctype, fields=fields, filters={"name": ["in", names]}, limit=len(names), order_by=None
+		):
+			title = r.lead_name if doctype == "CRM Lead" else (r.organization or r.lead_name)
+			titles[(doctype, r.name)] = title
+	return titles
+
+
 def task_row(task) -> dict:
 	return {f: task.get(f) for f in TASK_FIELDS}
 
@@ -1607,12 +1710,9 @@ def add_reps(rows: list[dict]) -> list[dict]:
 def enrich_calls(calls: list[dict]) -> list[dict]:
 	"""Call rows plus the rep's full name and the lead/deal title."""
 	rows = add_reps([call_row(c) for c in calls])
+	titles = record_titles((r.get("reference_doctype"), r.get("reference_docname")) for r in rows)
 	for row in rows:
-		row["reference_title"] = (
-			record_title(row["reference_doctype"], row["reference_docname"])
-			if row.get("reference_doctype") in CRM_DOCTYPES and row.get("reference_docname")
-			else None
-		)
+		row["reference_title"] = titles.get((row.get("reference_doctype"), row.get("reference_docname")))
 	return rows
 
 
@@ -1797,6 +1897,10 @@ EVENT_FIELDS = [
 	"_assign",
 ]
 MAX_SEARCH_RESULTS = 50
+# shorter queries match most of the CRM and each one is a LIKE '%q%' scan
+MIN_SEARCH_LENGTH = 2
+# get_emails and list_attachments called without page_length (older apps) return one capped list
+LEGACY_LIST_LIMIT = 100
 
 
 # Dashboard and search
@@ -1998,7 +2102,7 @@ SEARCH_SOURCES = (
 def search(q: str, limit: int = 20) -> list[dict]:
 	"""Leads, deals, contacts and organizations matching `q`, each list permission-checked."""
 	q = (q or "").strip()
-	if not q:
+	if len(q) < MIN_SEARCH_LENGTH:
 		return []
 	limit = min(max(cint(limit) or 20, 1), MAX_SEARCH_RESULTS)
 	results = []
@@ -2134,28 +2238,38 @@ def unread_notifications() -> int:
 
 @frappe.whitelist()
 @formatted
-def get_emails(doctype: str, name: str) -> list[dict]:
-	"""Emails of the record (and, for a deal, of the lead it came from), newest first."""
+def get_emails(
+	doctype: str, name: str, start: int = 0, page_length: int | None = None
+) -> list[dict] | dict:
+	"""Emails of the record (and, for a deal, of the lead it came from), newest first.
+
+	With `page_length`, a page: {data, has_more}. Without it (older apps), the newest 100 as a list.
+	"""
 	doc = get_crm_doc(doctype, name)
 	refs = [(doctype, name)]
 	if doctype == "CRM Deal" and doc.get("lead") and frappe.has_permission("CRM Lead", "read", doc.lead):
 		refs.append(("CRM Lead", doc.lead))
-	emails = []
-	for ref_doctype, ref_name in refs:
-		emails += frappe.get_all(
+
+	comm = frappe.qb.DocType("Communication")
+	query = (
+		frappe.qb.from_(comm)
+		.select(*(comm[f] for f in EMAIL_FIELDS))
+		.where(Criterion.any([(comm.reference_doctype == d) & (comm.reference_name == n) for d, n in refs]))
+		.where(comm.communication_type.isin(["Communication", "Automated Message"]))
+		.where(comm.communication_medium == "Email")
+		.orderby(comm.communication_date, order=Order.desc)
+		.orderby(comm.creation, order=Order.desc)
+	)
+	if page_length is None:
+		emails = query.limit(LEGACY_LIST_LIMIT).run(as_dict=True)
+	else:
+		result = paged(
+			lambda _doctype, start, page_length: query.limit(page_length).offset(start).run(as_dict=True),
 			"Communication",
-			filters={
-				"reference_doctype": ref_doctype,
-				"reference_name": ref_name,
-				"communication_type": ["in", ["Communication", "Automated Message"]],
-				"communication_medium": "Email",
-			},
-			fields=EMAIL_FIELDS,
-			order_by="creation desc",
-			limit=100,
+			start=start,
+			page_length=page_length,
 		)
-	emails.sort(key=lambda e: e.communication_date or e.creation, reverse=True)
-	emails = emails[:100]
+		emails = result["data"]
 
 	files = {}
 	if emails:
@@ -2171,7 +2285,7 @@ def get_emails(doctype: str, name: str) -> list[dict]:
 			files.setdefault(f.attached_to_name, []).append(
 				{"file_name": f.file_name, "file_url": f.file_url}
 			)
-	return [
+	rows = [
 		{
 			**{f: e.get(f) for f in EMAIL_FIELDS if f not in EMAIL_INTERNAL_FIELDS},
 			"creation": e.communication_date or e.creation,
@@ -2179,6 +2293,9 @@ def get_emails(doctype: str, name: str) -> list[dict]:
 		}
 		for e in emails
 	]
+	if page_length is None:
+		return rows
+	return {"data": rows, "has_more": result["has_more"]}
 
 
 @frappe.whitelist()
@@ -2276,14 +2393,20 @@ def join_addresses(value) -> str | None:
 
 @frappe.whitelist()
 @formatted
-def list_attachments(doctype: str, name: str) -> list[dict]:
+def list_attachments(
+	doctype: str, name: str, start: int = 0, page_length: int | None = None
+) -> list[dict] | dict:
+	"""Files of the record, newest first. With `page_length`, a page: {data, has_more}; without it
+	(older apps), the newest 100 as a list."""
 	get_crm_doc(doctype, name)
-	return frappe.get_all(
-		"File",
-		filters={"attached_to_doctype": doctype, "attached_to_name": name, "is_folder": 0},
-		fields=ATTACHMENT_FIELDS,
-		order_by="creation desc",
-	)
+	args = {
+		"filters": {"attached_to_doctype": doctype, "attached_to_name": name, "is_folder": 0},
+		"fields": ATTACHMENT_FIELDS,
+		"order_by": "creation desc",
+	}
+	if page_length is None:
+		return frappe.get_all("File", limit=LEGACY_LIST_LIMIT, **args)
+	return paged(frappe.get_all, "File", start=start, page_length=page_length, **args)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -2327,29 +2450,47 @@ def get_form(doctype: str) -> list[dict]:
 
 
 def form_sections(doctype: str) -> list[dict]:
+	"""Fields of the record page, in the web's order: the Data tab layout, then the side panel layout,
+	then any other visible custom field (added in Customize Form but not placed in a layout).
+
+	The web shows both layouts on a lead or deal, so a field the team added to either one shows here too.
+	"""
 	from crm.fcrm.doctype.crm_fields_layout.crm_fields_layout import get_fields_layout
 
-	layout_type = (
-		"Data Fields"
-		if frappe.db.exists("CRM Fields Layout", {"dt": doctype, "type": "Data Fields"})
-		else "Side Panel"
-	)
 	sections = []
 	seen = set()
-	for tab in get_fields_layout(doctype, layout_type) or []:
-		for section in tab.get("sections") or []:
-			fields = []
-			for column in section.get("columns") or []:
-				for field in column.get("fields") or []:
-					# get_fields_layout replaces known fieldnames with the field's meta (as a dict)
-					if not isinstance(field, dict) or field.get("fieldname") in seen:
-						continue
-					if field.get("hidden") or field.get("fieldtype") in LAYOUT_SKIP_FIELDTYPES:
-						continue
-					seen.add(field["fieldname"])
-					fields.append(form_field(field))
-			if fields:
-				sections.append({"section": section.get("label") or None, "fields": fields})
+
+	def add(field: dict, fields: list) -> None:
+		if field.get("fieldname") in seen:
+			return
+		if field.get("hidden") or field.get("fieldtype") in LAYOUT_SKIP_FIELDTYPES:
+			return
+		seen.add(field["fieldname"])
+		fields.append(form_field(field))
+
+	for layout_type in ("Data Fields", "Side Panel"):
+		if layout_type == "Data Fields" and not frappe.db.exists(
+			"CRM Fields Layout", {"dt": doctype, "type": layout_type}
+		):
+			continue
+		for tab in get_fields_layout(doctype, layout_type) or []:
+			for section in tab.get("sections") or []:
+				fields = []
+				for column in section.get("columns") or []:
+					for field in column.get("fields") or []:
+						# get_fields_layout replaces known fieldnames with the field's meta (as a dict)
+						if isinstance(field, dict):
+							add(field, fields)
+				if fields:
+					sections.append({"section": section.get("label") or None, "fields": fields})
+
+	# abm_crm's own fields are shown by the app in their own places
+	other = []
+	for field in frappe.get_meta(doctype).fields:
+		if field.get("is_custom_field") and field.get("module") != "Abm Crm":
+			add(field.as_dict(), other)
+	if other:
+		sections.append({"section": _("Other"), "fields": other})
 	return sections
 
 
@@ -2574,41 +2715,11 @@ def list_contacts(search: str | None = None, start: int = 0, page_length: int = 
 @frappe.whitelist()
 @formatted
 def get_contact(name: str) -> dict:
-	"""A contact with its deals (CRM Contacts rows) and open leads with the same email or mobile."""
+	"""A contact with the first page of its deals (CRM Contacts rows) and of the open leads with the
+	same email or mobile. More come from `list_related`."""
 	contact = frappe.get_doc("Contact", name)
 	contact.check_permission("read")
-	deal_names = frappe.get_all(
-		"CRM Contacts", filters={"contact": name, "parenttype": "CRM Deal"}, pluck="parent", distinct=True
-	)
-	deals = (
-		frappe.get_list(
-			"CRM Deal",
-			fields=DEAL_FIELDS,
-			filters={"name": ["in", deal_names]},
-			order_by="modified desc",
-			limit=50,
-		)
-		if deal_names
-		else []
-	)
-	or_filters = []
-	if contact.email_id:
-		or_filters.append(["email", "=", contact.email_id])
-	if contact.mobile_no:
-		or_filters.append(["mobile_no", "=", contact.mobile_no])
-	leads = (
-		frappe.get_list(
-			"CRM Lead",
-			fields=LEAD_FIELDS,
-			filters={"converted": 0},
-			or_filters=or_filters,
-			order_by="modified desc",
-			limit=50,
-		)
-		if or_filters
-		else []
-	)
-	return {"doc": contact_row(contact, detail=True), "deals": deals, "leads": leads}
+	return {"doc": contact_row(contact, detail=True), **first_related_pages(contact, ("deals", "leads"))}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -2695,23 +2806,78 @@ def list_organizations(search: str | None = None, start: int = 0, page_length: i
 @frappe.whitelist()
 @formatted
 def get_organization(name: str) -> dict:
+	"""An organization with the first page of its deals and contacts. More come from `list_related`."""
 	org = frappe.get_doc("CRM Organization", name)
 	org.check_permission("read")
 	return {
 		"doc": {f: org.get(f) for f in ORGANIZATION_FIELDS + ORGANIZATION_DETAIL_FIELDS},
-		"deals": frappe.get_list(
-			"CRM Deal", fields=DEAL_FIELDS, filters={"organization": name}, order_by="modified desc", limit=50
-		),
-		"contacts": frappe.get_list(
-			"Contact",
-			fields=CONTACT_FIELDS,
-			filters={"company_name": name},
-			order_by="modified desc",
-			limit=50,
-		)
-		if frappe.has_permission("Contact", "read")
-		else [],
+		**first_related_pages(org, ("deals", "contacts")),
 	}
+
+
+@frappe.whitelist()
+@formatted
+def list_related(doctype: str, name: str, kind: str, start: int = 0, page_length: int = 20) -> dict:
+	"""A page of a contact's `deals` / `leads`, or an organization's `deals` / `contacts`."""
+	if (doctype, kind) not in RELATED_KINDS:
+		frappe.throw(_("Unknown related list {0} of {1}").format(kind, doctype))
+	doc = frappe.get_doc(doctype, name)
+	doc.check_permission("read")
+	return related_records(doc, kind, start, page_length)
+
+
+RELATED_KINDS = {
+	("Contact", "deals"),
+	("Contact", "leads"),
+	("CRM Organization", "deals"),
+	("CRM Organization", "contacts"),
+}
+RELATED_PAGE_LENGTH = 20
+
+
+def first_related_pages(doc, kinds) -> dict:
+	"""{kind: rows, f"{kind}_has_more": bool} for the detail screens."""
+	out = {}
+	for kind in kinds:
+		page = related_records(doc, kind, 0, RELATED_PAGE_LENGTH)
+		out[kind] = page["data"]
+		out[f"{kind}_has_more"] = page["has_more"]
+	return out
+
+
+def related_records(doc, kind: str, start, page_length) -> dict:
+	"""A page of the records linked to a Contact or CRM Organization, newest first, permission-checked."""
+	page = {"start": start, "page_length": page_length, "order_by": "modified desc"}
+	if kind == "deals":
+		filters = (
+			[["CRM Contacts", "contact", "=", doc.name]]
+			if doc.doctype == "Contact"
+			else {"organization": doc.name}
+		)
+		result = paged(frappe.get_list, "CRM Deal", fields=DEAL_FIELDS, filters=filters, distinct=True, **page)
+		add_user_names(result["data"], "deal_owner", "deal_owner_name")
+		return result
+	if kind == "leads":
+		or_filters = []
+		if doc.email_id:
+			or_filters.append(["email", "=", doc.email_id])
+		if doc.mobile_no:
+			or_filters.append(["mobile_no", "=", doc.mobile_no])
+		if not or_filters:
+			return {"data": [], "has_more": False}
+		result = paged(
+			frappe.get_list,
+			"CRM Lead",
+			fields=LEAD_FIELDS,
+			filters={"converted": 0},
+			or_filters=or_filters,
+			**page,
+		)
+		add_user_names(result["data"], "lead_owner", "lead_owner_name")
+		return result
+	if not frappe.has_permission("Contact", "read"):
+		return {"data": [], "has_more": False}
+	return paged(frappe.get_list, "Contact", fields=CONTACT_FIELDS, filters={"company_name": doc.name}, **page)
 
 
 ORGANIZATION_KEYS = (
@@ -2801,13 +2967,8 @@ def agenda_items(start, end) -> list[dict]:
 		order_by="due_date asc",
 		limit=500,
 	)
-	titles = {}
+	titles = record_titles((t.reference_doctype, t.reference_docname) for t in tasks)
 	for t in tasks:
-		key = (t.reference_doctype, t.reference_docname)
-		if key not in titles:
-			titles[key] = (
-				record_title(*key) if t.reference_doctype in CRM_DOCTYPES and t.reference_docname else None
-			)
 		items.append(
 			{
 				"kind": "task",
@@ -2819,7 +2980,7 @@ def agenda_items(start, end) -> list[dict]:
 				"status": t.status,
 				"reference_doctype": t.reference_doctype,
 				"reference_docname": t.reference_docname,
-				"reference_title": titles[key],
+				"reference_title": titles.get((t.reference_doctype, t.reference_docname)),
 			}
 		)
 	items.sort(key=lambda i: (get_datetime(i["start"]), i["kind"] != "event" or not i["all_day"]))
@@ -2838,12 +2999,9 @@ def event_references(names: list[str]) -> dict:
 		order_by="idx asc",
 	):
 		if p.parent not in refs and p.reference_docname:
-			refs[p.parent] = (
-				p.reference_doctype,
-				p.reference_docname,
-				record_title(p.reference_doctype, p.reference_docname),
-			)
-	return refs
+			refs[p.parent] = (p.reference_doctype, p.reference_docname)
+	titles = record_titles(refs.values())
+	return {event: (*ref, titles.get(ref)) for event, ref in refs.items()}
 
 
 def event_item(event, ref=None) -> dict:

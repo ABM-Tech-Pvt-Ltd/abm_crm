@@ -19,12 +19,51 @@ def after_install():
 	setup_settings_defaults()
 	setup_whatsapp_templates()
 	add_campaign_section()
+	setup_indexes()
 
 
 def after_migrate():
 	setup_custom_fields()
 	setup_settings_defaults()
 	setup_whatsapp_templates()
+	setup_indexes()
+
+
+# Indexes for the mobile app's lists and filters (abm_crm/api/mobile.py), which the crm doctypes
+# do not have. (doctype, columns); the index is named abm_<columns>_index.
+INDEXES = (
+	("CRM Call Log", ("caller", "start_time")),
+	("CRM Call Log", ("receiver", "start_time")),
+	("CRM Call Log", ("start_time",)),
+	("CRM Call Log", ("reference_doctype", "reference_docname")),
+	("CRM Task", ("assigned_to", "due_date")),
+	("CRM Task", ("reference_doctype", "reference_docname")),
+	("CRM Notification", ("to_user", "creation")),
+	("CRM Notification", ("to_user", "read")),
+	("CRM Lead", ("converted", "modified")),
+	("CRM Lead", ("lead_owner", "modified")),
+	("CRM Lead", ("mobile_no",)),
+	("CRM Deal", ("deal_owner", "modified")),
+	("CRM Deal", ("organization",)),
+	("CRM Deal", ("lead",)),
+	("CRM Contacts", ("contact",)),
+	("Contact", ("company_name",)),
+	("Contact", ("mobile_no",)),
+	("Event", ("starts_on",)),
+)
+
+
+def setup_indexes():
+	"""Add the missing INDEXES (idempotent; skips doctypes or columns this site does not have)."""
+	for doctype, columns in INDEXES:
+		if not frappe.db.table_exists(doctype) or not all(frappe.db.has_column(doctype, c) for c in columns):
+			continue
+		index = f"abm_{'_'.join(columns)}_index"
+		if frappe.db.has_index(f"tab{doctype}", index):
+			continue
+		# columns quoted: `read` is a reserved word
+		quoted = ", ".join(f"`{c}`" for c in columns)
+		frappe.db.sql_ddl(f"alter table `tab{doctype}` add index if not exists `{index}` ({quoted})")
 
 
 def add_campaign_section():

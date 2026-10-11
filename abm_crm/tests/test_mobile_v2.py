@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import add_days, now_datetime, nowdate
+from frappe.utils import add_days, add_to_date, now_datetime, nowdate
 from frappe.utils.password import update_password
 from PIL import Image
 
@@ -103,6 +103,13 @@ class TestMobileV2(IntegrationTestCase):
 		).insert(ignore_permissions=True)
 		self.track("CRM Deal", deal.name)
 		return deal
+
+	def make_org(self):
+		org = frappe.get_doc(
+			{"doctype": "CRM Organization", "organization_name": f"V2 Deal Org {self.token}"}
+		).insert(ignore_permissions=True)
+		self.track("CRM Organization", org.name)
+		return org
 
 	def track_files(self, **filters):
 		for name in frappe.get_all("File", filters=filters, pluck="name"):
@@ -294,19 +301,16 @@ class TestMobileV2(IntegrationTestCase):
 
 		frappe.set_user(REP)
 		for doctype in ("CRM Lead", "CRM Deal"):
-			layout_type = (
-				"Data Fields"
-				if frappe.db.exists("CRM Fields Layout", {"dt": doctype, "type": "Data Fields"})
-				else "Side Panel"
-			)
+			# both layouts the web shows, plus visible custom fields that are in neither
 			in_layout = {
 				f["fieldname"]
+				for layout_type in ("Data Fields", "Side Panel")
 				for tab in get_fields_layout(doctype, layout_type)
 				for s in tab.get("sections") or []
 				for c in s.get("columns") or []
 				for f in c.get("fields") or []
 				if isinstance(f, dict)
-			}
+			} | {f.fieldname for f in frappe.get_meta(doctype).fields if f.get("is_custom_field")}
 			form = mobile.get_form(doctype)
 			fields = [f for s in form for f in s["fields"]]
 			self.assertTrue(fields)
@@ -574,6 +578,136 @@ class TestMobileV2(IntegrationTestCase):
 		self.assertRaises(frappe.ValidationError, mobile.update_profile, mobile_no="123")
 		# only the session user's own record is touched
 		self.assertNotEqual(frappe.db.get_value("User", REP2, "first_name"), "Ravi")
+
+
+	# paging and large lists
+
+	def make_email(self, subject, minutes_ago, reference=None):
+		doctype, name = reference or ("CRM Lead", self.lead.name)
+		comm = frappe.get_doc(
+			{
+				"doctype": "Communication",
+				"communication_type": "Communication",
+				"communication_medium": "Email",
+				"sent_or_received": "Received",
+				"subject": subject,
+				"sender": "someone@example.com",
+				"communication_date": add_to_date(now_datetime(), minutes=-minutes_ago),
+				"reference_doctype": doctype,
+				"reference_name": name,
+			}
+		).insert(ignore_permissions=True)
+		return self.track("Communication", comm.name)
+
+	def test_emails_paged_and_legacy_list(self):
+		names = [self.make_email(f"Mail {i} {self.token}", minutes_ago=i) for i in range(3)]
+		frappe.set_user(REP)
+		first = mobile.get_emails("CRM Lead", self.lead.name, page_length=2)
+		self.assertEqual([e["name"] for e in first["data"]], names[:2])
+		self.assertTrue(first["has_more"])
+		rest = mobile.get_emails("CRM Lead", self.lead.name, start=2, page_length=2)
+		self.assertEqual(([e["name"] for e in rest["data"]], rest["has_more"]), (names[2:], False))
+		# without page_length (older apps): the plain list, newest first
+		self.assertEqual([e["name"] for e in mobile.get_emails("CRM Lead", self.lead.name)], names)
+
+	def test_deal_emails_include_the_leads(self):
+		deal = self.make_deal(REP, lead=self.lead.name)
+		lead_mail = self.make_email(f"Lead mail {self.token}", minutes_ago=5)
+		deal_mail = self.make_email(
+			f"Deal mail {self.token}", minutes_ago=1, reference=("CRM Deal", deal.name)
+		)
+		frappe.set_user(REP)
+		page = mobile.get_emails("CRM Deal", deal.name, page_length=20)
+		self.assertEqual([e["name"] for e in page["data"]], [deal_mail, lead_mail])
+		self.assertFalse(page["has_more"])
+
+	def test_attachments_paged(self):
+		frappe.set_user(REP)
+		with patch.object(mobile, "uploaded_file", return_value=("v2-page.txt", b"x")):
+			for _ in range(3):
+				self.track("File", mobile.upload_attachment("CRM Lead", self.lead.name)["name"])
+		page = mobile.list_attachments("CRM Lead", self.lead.name, page_length=2)
+		self.assertEqual((len(page["data"]), page["has_more"]), (2, True))
+		page = mobile.list_attachments("CRM Lead", self.lead.name, start=2, page_length=2)
+		self.assertEqual((len(page["data"]), page["has_more"]), (1, False))
+		self.assertEqual(len(mobile.list_attachments("CRM Lead", self.lead.name)), 3)
+		# page_length is capped
+		page = mobile.list_attachments("CRM Lead", self.lead.name, page_length=10_000)
+		self.assertEqual(len(page["data"]), 3)
+
+	def test_contact_and_organization_related_pages(self):
+		frappe.set_user(REP)
+		org = mobile.create_organization({"organization_name": f"V2 Paged {self.token}"})
+		self.track("CRM Organization", org["name"])
+		contact = mobile.create_contact(
+			{"first_name": "Page", "last_name": self.token, "company_name": org["name"]}
+		)
+		self.track("Contact", contact["name"])
+		frappe.set_user("Administrator")
+		deals = [
+			self.make_deal(REP, organization=org["name"], contacts=[{"contact": contact["name"]}])
+			for _ in range(mobile.RELATED_PAGE_LENGTH + 1)
+		]
+		hidden = self.make_deal(REP2, organization=org["name"], contacts=[{"contact": contact["name"]}])
+
+		frappe.set_user(REP)
+		for doctype, name, getter in (
+			("Contact", contact["name"], mobile.get_contact),
+			("CRM Organization", org["name"], mobile.get_organization),
+		):
+			detail = getter(name)
+			self.assertEqual(len(detail["deals"]), mobile.RELATED_PAGE_LENGTH)
+			self.assertTrue(detail["deals_has_more"])
+			more = mobile.list_related(doctype, name, "deals", start=mobile.RELATED_PAGE_LENGTH)
+			self.assertFalse(more["has_more"])
+			listed = {d["name"] for d in detail["deals"] + more["data"]}
+			self.assertEqual(listed, {d.name for d in deals})  # not REP2's deal
+			self.assertNotIn(hidden.name, listed)
+
+		org_contacts = mobile.get_organization(org["name"])["contacts"]
+		self.assertEqual([c["name"] for c in org_contacts], [contact["name"]])
+		self.assertFalse(mobile.get_contact(contact["name"])["leads_has_more"])
+		self.assertRaises(frappe.ValidationError, mobile.list_related, "Contact", contact["name"], "contacts")
+		# another rep sees only their own deal of the same contact
+		frappe.set_user(REP2)
+		theirs = mobile.list_related("Contact", contact["name"], "deals")["data"]
+		self.assertEqual([d["name"] for d in theirs], [hidden.name])
+
+	def test_lead_list_total_and_owner_name(self):
+		for _ in range(2):
+			self.make_lead(REP)
+		frappe.set_user(REP)
+		page = mobile.list_leads(search=self.token, page_length=2)
+		self.assertEqual((page["total"], len(page["data"]), page["has_more"]), (3, 2, True))
+		self.assertEqual(page["data"][0]["lead_owner_name"], frappe.db.get_value("User", REP, "full_name"))
+		self.assertNotIn("total", mobile.list_leads(search=self.token, start=2, page_length=2))
+		deal = self.make_deal(REP, organization=self.make_org().name)
+		page = mobile.list_deals(search=self.token)
+		self.assertEqual((page["total"], page["data"][0]["name"]), (1, deal.name))
+		self.assertEqual(page["data"][0]["deal_owner_name"], frappe.db.get_value("User", REP, "full_name"))
+
+	def test_search_needs_two_characters(self):
+		frappe.set_user(REP)
+		self.assertEqual(mobile.search("V"), [])
+		self.assertIn(self.lead.name, [r["name"] for r in mobile.search(self.token)])
+
+	def test_call_titles_batched_and_permission_checked(self):
+		other = self.make_lead(REP2)
+		deal = self.make_deal(REP, organization=self.make_org().name)
+		refs = [
+			("CRM Lead", self.lead.name),
+			("CRM Lead", other.name),  # REP2's
+			("CRM Deal", deal.name),
+			("CRM Lead", "missing"),
+			(None, None),
+		]
+		calls = [
+			{"name": str(i), "type": "Outgoing", "reference_doctype": d, "reference_docname": n}
+			for i, (d, n) in enumerate(refs)
+		]
+		frappe.set_user(REP)
+		titles = [c["reference_title"] for c in mobile.enrich_calls(calls)]
+		self.assertEqual(titles, [self.lead.lead_name, None, deal.organization, None, None])
 
 
 class TestBrandAndPassword(IntegrationTestCase):

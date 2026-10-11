@@ -66,7 +66,9 @@ Data for the current user:
 - `list_leads` leaves out converted leads (they continue as deals), like the CRM's own list.
 - `order_by` is `<field> [asc|desc]` with field modified, creation, lead_name, organization, status or deal_value; anything else falls back to `modified desc`. `page_length` is at most 100.
 - Uses `frappe.get_list`, so permissions apply.
-- Returns `{"data": [LeadRow], "has_more": bool}`.
+- Returns `{"data": [LeadRow + lead_owner_name], "has_more": bool, "total": int}`. `lead_owner_name` (`deal_owner_name`
+  for deals) is the owner's full name. `total`, the number of matching records the user can see, comes with the first
+  page (`start=0`) only.
 
 ### `list_deals(...)`
 Same as `list_leads`, returning DealRows.
@@ -280,7 +282,7 @@ All methods are in `abm_crm.api.mobile`, unless noted. Normal permission checks 
 | Method | Returns |
 |---|---|
 | `get_dashboard()` | `{greeting_name, stats: {open_leads, open_deals, pipeline_value, currency, won_this_month, won_value_this_month, tasks_today, tasks_overdue, calls_today, talk_time_today, unread_notifications}, agenda: [AgendaItem] (today and tomorrow; tasks and events merged, sorted by time), pipeline: [{status, color, count, value}] (open deal statuses), recent: [{doctype, name, title, status, modified}] (last 8 records I touched)}` |
-| `search(q, limit=20)` | `[{doctype, name, title, subtitle}]` across leads, deals, contacts and organizations. Matches name, organization, email and mobile. |
+| `search(q, limit=20)` | `[{doctype, name, title, subtitle}]` across leads, deals, contacts and organizations. Matches name, organization, email and mobile. `q` shorter than 2 characters returns `[]`; `limit` is at most 50. |
 
 **Notifications** (CRM Notification for the session user)
 
@@ -293,7 +295,7 @@ All methods are in `abm_crm.api.mobile`, unless noted. Normal permission checks 
 
 | Method | Returns / does |
 |---|---|
-| `get_emails(doctype, name)` | `[{name, subject, content (HTML), sender, sender_full_name, recipients, cc, bcc, sent_or_received, creation, read_by_recipient, attachments: [{file_name, file_url}], in_reply_to}]`, newest first |
+| `get_emails(doctype, name, start=0, page_length=None)` | With `page_length` (at most 100): `{data: [Email], has_more}`. Without it (older apps): `[Email]`, the newest 100. Email: `{name, subject, content (HTML), sender, sender_full_name, recipients, cc, bcc, sent_or_received, creation, read_by_recipient, attachments: [{file_name, file_url}], in_reply_to}`, newest first |
 | `get_email_setup(doctype, name)` | `{senders: [abm_crm.api.email sender options], templates: [{name, subject}] (Email Template with reference_doctype = doctype or empty), to: [default recipient email]}` |
 | `render_email_template(template, doctype, name)` | `{subject, content}`, rendered with the record |
 | `send_email(doctype, name, to, subject, content, cc=None, bcc=None, sender=None, attachments=None (File names), in_reply_to=None)` | Uses `frappe.core.doctype.communication.email.make`, the same path the web composer uses, so sender rules apply. Returns the Communication name. |
@@ -302,7 +304,7 @@ All methods are in `abm_crm.api.mobile`, unless noted. Normal permission checks 
 
 | Method | Returns / does |
 |---|---|
-| `list_attachments(doctype, name)` | `[{name, file_name, file_url, file_size, is_private, owner, creation}]` |
+| `list_attachments(doctype, name, start=0, page_length=None)` | With `page_length` (at most 100): `{data: [File], has_more}`. Without it (older apps): `[File]`, the newest 100. File: `{name, file_name, file_url, file_size, is_private, owner, creation}` |
 | `upload_attachment(doctype, name)` | Multipart `file`; private by default. Returns the row. |
 | `delete_attachment(file)` | Only the owner or a manager. |
 
@@ -325,10 +327,11 @@ All methods are in `abm_crm.api.mobile`, unless noted. Normal permission checks 
 | Method | Returns |
 |---|---|
 | `list_contacts(search=None, start=0, page_length=20)` | `{data: [{name, full_name, email_id, mobile_no, company_name, image}], has_more}` |
-| `get_contact(name)` | `{doc, deals: [DealRow], leads: [LeadRow]}` |
+| `get_contact(name)` | `{doc, deals: [DealRow], leads: [LeadRow], deals_has_more, leads_has_more}`: the first 20 of each (rows include the owner's full name); more with `list_related` |
 | `create_contact(data)` | Keys: first_name, last_name, email_id, mobile_no, company_name. Returns the row. |
 | `list_organizations(search=None, start=0, page_length=20)` | `{data: [{name, organization_name, website, industry, territory, organization_logo, annual_revenue}], has_more}` |
-| `get_organization(name)` | `{doc, deals: [DealRow], contacts: [contact rows]}` |
+| `get_organization(name)` | `{doc, deals: [DealRow], contacts: [contact rows], deals_has_more, contacts_has_more}`: the first 20 of each; more with `list_related` |
+| `list_related(doctype, name, kind, start=0, page_length=20)` | A page of a Contact's `deals` / `leads` or a CRM Organization's `deals` / `contacts`: `{data, has_more}`, newest first, permission-checked |
 | `create_organization(data)` | Returns the row. |
 
 **Calendar** (Frappe Event, linked to a CRM record through Event Participants)
@@ -378,8 +381,8 @@ matches than `limit`, results are taken in turn from each doctype so one doctype
 session user's notifications.
 
 **Email**
-- `get_emails` for a deal also lists the emails of the lead it was converted from (as the web timeline does), at most 100.
-  `creation` is the communication date.
+- `get_emails` for a deal also lists the emails of the lead it was converted from (as the web timeline does), in one
+  list ordered by communication date. `creation` is the communication date.
 - Templates: enabled Email Templates whose `reference_doctype` is the doctype or empty. Rendering uses
   `Email Template.get_formatted_email` with the record's fields plus `doc`, exactly like the web composer.
 - `send_email`: `to`, `cc`, `bcc` may be a list or a comma-separated string. Without `sender`, the default sender
