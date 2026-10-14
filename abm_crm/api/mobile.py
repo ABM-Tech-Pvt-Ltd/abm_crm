@@ -2631,12 +2631,24 @@ def update_record(doctype: str, name: str, values: dict | str) -> dict:
 	doc = get_crm_doc(doctype, name)
 	doc.check_permission("write")
 	fields = {f["fieldname"]: f for f in form_fields(doctype)}
+
+	def unchanged(fieldname, value) -> bool:
+		current = doc.get(fieldname)
+		return (current in (None, "") and value in (None, "")) or str(current) == str(value)
+
+	# an app with an older copy of the form may send fields that are no longer editable; ignore
+	# them while their value is unchanged, refuse only a real change
+	values = {
+		k: v for k, v in values.items() if fields.get(k) and not fields[k]["read_only"] or not unchanged(k, v)
+	}
 	for fieldname in values:
 		field = fields.get(fieldname)
 		if not field:
 			frappe.throw(_("Field {0} cannot be edited here").format(fieldname))
 		if field["read_only"]:
 			frappe.throw(_("Field {0} is read only").format(field["label"]))
+	if not values:
+		return get_record(doctype, name)["doc"]
 	doc.update({k: (None if v == "" else v) for k, v in values.items()})
 	doc.save()
 	return get_record(doctype, name)["doc"]

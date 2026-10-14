@@ -323,6 +323,20 @@ class TestMobileV2(IntegrationTestCase):
 					self.assertTrue(f["options"])
 		self.assertRaises(frappe.ValidationError, mobile.get_form, "Contact")
 
+	def test_update_record_ignores_unchanged_fields_from_an_old_form(self):
+		layout = [{"section": "Details", "fields": [
+			{"fieldname": "website", "label": "Website", "fieldtype": "Data", "options": None, "reqd": 0, "read_only": 0},
+		]}]
+		frappe.set_user(REP)
+		with patch.object(mobile, "form_sections", return_value=layout):
+			# "converted" is not in the form; sent unchanged (an older app's form), it is ignored
+			doc = mobile.update_record("CRM Lead", self.lead.name, {"website": "https://old.example.com", "converted": 0, "job_title": ""})
+			self.assertEqual(doc["website"], "https://old.example.com")
+			# only nothing-but-unchanged fields: no error, nothing saved
+			mobile.update_record("CRM Lead", self.lead.name, {"converted": 0})
+			# a real change to it is still refused
+			self.assertRaises(frappe.ValidationError, mobile.update_record, "CRM Lead", self.lead.name, {"converted": 1})
+
 	def test_update_record_only_editable_layout_fields(self):
 		layout = [
 			{
