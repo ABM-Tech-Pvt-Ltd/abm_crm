@@ -74,6 +74,10 @@ DEAL_FIELDS = [
 	"creation",
 ]
 DETAIL_FIELDS = [
+	"abm_lead_sync_source",
+	"abm_form_answers",
+	"lost_reason",
+	"lost_notes",
 	"territory",
 	"industry",
 	"website",
@@ -371,6 +375,10 @@ def bootstrap() -> dict:
 		"lead_statuses": get_statuses("CRM Lead Status"),
 		"deal_statuses": get_statuses("CRM Deal Status"),
 		"lead_sources": frappe.get_all("CRM Lead Source", pluck="name", order_by="name asc"),
+		# a lead or deal moved to a status of type Lost needs one of these (crm validates it)
+		"lost_reasons": frappe.get_all("CRM Lost Reason", pluck="name", order_by="name asc"),
+		# with forecasting on, crm requires expected deal value and closure date on every deal save
+		"deal_forecasting": cint(frappe.db.get_single_value("FCRM Settings", "enable_forecasting")),
 		"call_outcomes": list(CALL_OUTCOMES),
 		"users": crm_users(),
 		"settings": {
@@ -522,12 +530,19 @@ def get_record(doctype: str, name: str) -> dict:
 	row.update({f: doc.get(f) for f in DETAIL_FIELDS})
 	row.update(lead_info(doc))
 
+	# a deal also shows its lead's history from before conversion, as on the web
+	refs = [(doctype, name)]
+	if doctype == "CRM Deal" and doc.get("lead") and frappe.has_permission("CRM Lead", "read", doc.lead):
+		refs.append(("CRM Lead", doc.lead))
+	names = [n for _dt, n in refs]
+	ref = {"reference_doctype": ["in", [dt for dt, _n in refs]], "reference_docname": ["in", names]}
+
 	linked_calls = frappe.get_all(
 		"Dynamic Link",
-		filters={"parenttype": "CRM Call Log", "link_doctype": doctype, "link_name": name},
+		filters={"parenttype": "CRM Call Log", "link_doctype": ["in", [dt for dt, _n in refs]], "link_name": ["in", names]},
 		pluck="parent",
 	)
-	call_filters = {"reference_docname": name}
+	call_filters = {"reference_docname": ["in", names]}
 	if linked_calls:
 		call_filters["name"] = ["in", linked_calls]
 
@@ -581,9 +596,20 @@ def get_record(doctype: str, name: str) -> dict:
 
 @frappe.whitelist(methods=["POST"])
 @formatted
-def update_status(doctype: str, name: str, status: str) -> dict:
+def update_status(
+	doctype: str,
+	name: str,
+	status: str,
+	lost_reason: str | None = None,
+	lost_notes: str | None = None,
+) -> dict:
+	"""Change the status. A status of type Lost needs `lost_reason` ("Other" also needs `lost_notes`)."""
 	doc = get_crm_doc(doctype, name)
 	doc.status = status
+	if lost_reason:
+		doc.lost_reason = lost_reason
+	if lost_notes:
+		doc.lost_notes = lost_notes
 	doc.save()
 	return record_row(doc)
 
@@ -951,11 +977,64 @@ def upload_recording(call_log: str) -> dict:
 		frappe.throw(_("Send the recording as the file field"))
 	filename, content = upload
 	check_extension(filename, AUDIO_EXTENSIONS)
+	if log.recording_url:
+		# already has its recording (a retry after a lost response); never replace it with another file
+		return {"recording_url": log.recording_url}
 	# browsers can't play AMR; older app versions upload it as is
 	filename, content = to_m4a(filename, content)
+	other = recording_used_elsewhere(content, log.name)
+	if other:
+		frappe.throw(
+			_("This recording is already attached to call {0}, so it is not from this call").format(other)
+		)
 	file = attach_file(filename, content, "CRM Call Log", log.name, "recording_url")
 	log.db_set("recording_url", file.file_url)
 	return {"recording_url": file.file_url}
+
+
+def recording_used_elsewhere(content: bytes, call_log: str) -> str | None:
+	"""The other call log that already has this exact recording file, if any."""
+	import hashlib
+
+	return frappe.db.get_value(
+		"File",
+		{
+			"content_hash": hashlib.md5(content).hexdigest(),
+			"attached_to_doctype": "CRM Call Log",
+			"attached_to_name": ["!=", call_log],
+		},
+		"attached_to_name",
+	)
+
+
+@frappe.whitelist()
+def find_shared_recordings() -> list[dict]:
+	"""Recordings attached to more than one call log (a recording matched to the wrong call by an
+	older app version). Managers only. Lists them for review; nothing is changed."""
+	frappe.only_for(("System Manager", "Sales Manager"))
+	groups = frappe.db.sql(
+		"""select content_hash from `tabFile`
+		where attached_to_doctype = 'CRM Call Log' and ifnull(content_hash, '') != ''
+		group by content_hash having count(distinct attached_to_name) > 1""",
+		pluck=True,
+	)
+	result = []
+	for content_hash in groups[:200]:
+		calls = frappe.get_all(
+			"File",
+			filters={"content_hash": content_hash, "attached_to_doctype": "CRM Call Log"},
+			pluck="attached_to_name",
+		)
+		result.append(
+			{
+				"calls": frappe.get_all(
+					"CRM Call Log",
+					filters={"name": ["in", calls]},
+					fields=["name", "caller", "receiver", "from", "to", "start_time", "duration", "reference_docname"],
+				)
+			}
+		)
+	return result
 
 
 @frappe.whitelist(methods=["POST"])

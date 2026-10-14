@@ -11,7 +11,15 @@ CAMPAIGN_SECTION = {
 	"columns": [
 		{
 			"name": "abm_campaign_column",
-			"fields": ["abm_campaign", "abm_adset", "abm_ad", "abm_platform", "abm_routing_rule"],
+			"fields": [
+				"abm_lead_sync_source",
+				"abm_campaign",
+				"abm_adset",
+				"abm_ad",
+				"abm_platform",
+				"abm_form_answers",
+				"abm_routing_rule",
+			],
 		}
 	],
 }

@@ -710,6 +710,42 @@ class TestMobileV2(IntegrationTestCase):
 		self.assertEqual(titles, [self.lead.lead_name, None, deal.organization, None, None])
 
 
+	def test_deal_shows_its_leads_calls_like_the_web(self):
+		org = self.make_org()
+		deal = self.make_deal(REP, organization=org.name, lead=self.lead.name)
+		call = frappe.get_doc(
+			{
+				"doctype": "CRM Call Log",
+				"id": f"v2-lead-call-{self.token}",
+				"type": "Outgoing",
+				"status": "Completed",
+				"from": "+919900000001",
+				"to": "+919900000002",
+				"reference_doctype": "CRM Lead",
+				"reference_docname": self.lead.name,
+			}
+		).insert(ignore_permissions=True)
+		self.track("CRM Call Log", call.name)
+		frappe.set_user(REP)
+		self.assertIn(call.name, [c["name"] for c in mobile.get_record("CRM Deal", deal.name)["calls"]])
+		self.assertIn(call.name, [c["name"] for c in mobile.get_record("CRM Lead", self.lead.name)["calls"]])
+
+	def test_lost_status_needs_a_reason(self):
+		lost = frappe.get_all("CRM Lead Status", filters={"type": "Lost"}, pluck="name", limit=1)
+		if not lost:
+			self.skipTest("no lead status of type Lost")
+		if not frappe.db.exists("CRM Lost Reason", "Budget too low"):
+			frappe.get_doc({"doctype": "CRM Lost Reason", "lost_reason": "Budget too low"}).insert(ignore_permissions=True)
+		frappe.set_user(REP)
+		# crm refuses a Lost status without a reason; the app sends one
+		self.assertRaises(frappe.ValidationError, mobile.update_status, "CRM Lead", self.lead.name, lost[0])
+		row = mobile.update_status("CRM Lead", self.lead.name, lost[0], lost_reason="Budget too low")
+		self.assertEqual(row["status"], lost[0])
+		self.assertEqual(frappe.db.get_value("CRM Lead", self.lead.name, "lost_reason"), "Budget too low")
+		frappe.set_user("Administrator")
+		self.assertIn("Budget too low", mobile.bootstrap()["lost_reasons"])
+
+
 class TestBrandAndPassword(IntegrationTestCase):
 	def test_brand_is_public_and_inline(self):
 		from abm_crm.api.mobile import get_brand

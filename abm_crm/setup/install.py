@@ -206,6 +206,7 @@ def campaign_fields():
 		("abm_adset", "Ad Set", "Data"),
 		("abm_ad", "Ad", "Data"),
 		("abm_platform", "Platform", "Data"),
+		("abm_form_answers", "Other Form Answers", "Small Text"),
 		("abm_campaign_column", None, "Column Break"),
 		("abm_campaign_id", "Campaign ID", "Data"),
 		("abm_adset_id", "Ad Set ID", "Data"),
@@ -226,6 +227,9 @@ def campaign_fields():
 			field["options"] = "Lead Sync Source"
 		if fieldtype == "Data":
 			field["in_standard_filter"] = fieldname in ("abm_campaign", "abm_platform")
+		if fieldname == "abm_form_answers":
+			# answers to lead form questions that are not mapped to a CRM field (abm_crm.lead_routing)
+			field["description"] = "Lead form questions that are not mapped to a field, one per line"
 		result.append(field)
 	return result
 

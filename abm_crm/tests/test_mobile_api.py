@@ -192,6 +192,19 @@ class TestMobileAPI(IntegrationTestCase):
 		with patch.object(mobile, "uploaded_file", return_value=("page.html", b"<b>x</b>")):
 			self.assertRaises(frappe.ValidationError, mobile.upload_recording, log)
 
+	def test_one_recording_is_never_attached_to_two_calls(self):
+		frappe.set_user(REP)
+		first, second = (r["call_log"] for r in mobile.sync_calls([phone_call("31"), phone_call("32", duration=60)], "dev-d"))
+		upload = ("abm-test-recording.m4a", frappe.generate_hash().encode())
+		with patch.object(mobile, "uploaded_file", return_value=upload):
+			url = mobile.upload_recording(first)["recording_url"]
+			self.track_file(url)
+			# the same file again for another call: matched to the wrong call on the phone
+			self.assertRaises(frappe.ValidationError, mobile.upload_recording, second)
+			# the same call again (a retry) keeps its recording
+			self.assertEqual(mobile.upload_recording(first)["recording_url"], url)
+		self.assertFalse(frappe.db.get_value("CRM Call Log", second, "recording_url"))
+
 	def test_set_call_outcome_creates_note_and_task(self):
 		frappe.set_user(REP)
 		log = mobile.sync_calls([phone_call("40")], "dev-e")[0]["call_log"]

@@ -26,6 +26,7 @@ ATTRIBUTION_FIELDS = (
 	"abm_ad_id",
 	"abm_platform",
 	"abm_lead_sync_source",
+	"abm_form_answers",
 )
 OPEN_STATUS_TYPES = ("Open", "Ongoing")
 FB_PLATFORMS = {"fb": "Facebook", "ig": "Instagram", "msgr": "Messenger", "wa": "WhatsApp"}
@@ -40,7 +41,7 @@ def before_insert_lead(doc, method=None):
 		doc.abm_lead_sync_source = frappe.db.get_value(
 			"Lead Sync Source", {"facebook_lead_form": doc.facebook_form_id}, "name"
 		)
-	if doc.facebook_lead_id and not doc.get("abm_campaign_id"):
+	if doc.facebook_lead_id and not (doc.get("abm_campaign_id") and doc.get("abm_form_answers")):
 		set_facebook_attribution(doc)
 	if doc.facebook_lead_id and not doc.get("abm_platform"):
 		doc.abm_platform = "Facebook"
@@ -78,6 +79,10 @@ def set_facebook_attribution(doc):
 	if not data:
 		return
 
+	if not doc.get("abm_form_answers"):
+		doc.abm_form_answers = unmapped_answers(data.get("field_data"), doc.facebook_form_id)
+	if doc.get("abm_campaign_id"):
+		return
 	doc.abm_campaign_id = data.get("campaign_id")
 	doc.abm_campaign = data.get("campaign_name") or data.get("campaign_id")
 	doc.abm_adset_id = data.get("adset_id")
@@ -97,8 +102,9 @@ def get_sync_source_token(sync_source: str | None) -> str | None:
 def fetch_facebook_lead(lead_id: str, token: str) -> dict | None:
 	# names need ads_read on the ad account; ids come with leads_retrieval alone, so fall back to ids
 	field_sets = (
-		"campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,platform",
-		"campaign_id,adset_id,ad_id,platform",
+		"campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,platform,field_data",
+		"campaign_id,adset_id,ad_id,platform,field_data",
+		"field_data",
 	)
 	url = get_fb_graph_api_url(f"/{lead_id}")
 	for fields in field_sets:
@@ -108,6 +114,68 @@ def fetch_facebook_lead(lead_id: str, token: str) -> dict | None:
 			continue
 	frappe.log_error(f"Could not fetch campaign details for Facebook lead {lead_id}", "ABM Lead Routing")
 	return None
+
+
+def unmapped_answers(field_data: list | None, form_id: str | None) -> str | None:
+	"""Answers to form questions that are not mapped to a CRM field, as "Question: answer" lines.
+
+	The lead form's extra questions (budget, preferred location, ...) are kept on the lead this way
+	instead of being dropped by the sync.
+	"""
+	if not field_data:
+		return None
+	questions = {
+		q.key: q
+		for q in frappe.get_all(
+			"Facebook Lead Form Question",
+			filters={"parent": form_id or ""},
+			fields=["key", "label", "mapped_to_crm_field"],
+		)
+	}
+	lines = []
+	for item in field_data:
+		values = [str(v) for v in item.get("values") or [] if str(v).strip()]
+		key = item.get("name")
+		question = questions.get(key)
+		if not values or (question and question.mapped_to_crm_field):
+			continue
+		label = (question and question.label) or (key or "").replace("_", " ").strip().capitalize()
+		lines.append(f"{label}: {', '.join(values)}")
+	return "\n".join(lines) or None
+
+
+@frappe.whitelist()
+def backfill_form_answers(limit: int = 500) -> dict:
+	"""Fill "Other Form Answers" on Facebook leads synced before it existed, from Facebook. Managers only.
+
+	Safe to run again: leads that already have answers are skipped. Run it more than once when there
+	are more than `limit` leads.
+	"""
+	frappe.only_for(("System Manager", "Sales Manager"))
+	leads = frappe.get_all(
+		"CRM Lead",
+		filters={"facebook_lead_id": ["is", "set"], "abm_form_answers": ["is", "not set"]},
+		fields=["name", "facebook_lead_id", "facebook_form_id", "abm_lead_sync_source"],
+		order_by="creation desc",
+		limit=cint(limit) or 500,
+	)
+	tokens = {}
+	filled = 0
+	for lead in leads:
+		source = lead.abm_lead_sync_source or frappe.db.get_value(
+			"Lead Sync Source", {"facebook_lead_form": lead.facebook_form_id}, "name"
+		)
+		if source not in tokens:
+			tokens[source] = get_sync_source_token(source)
+		if not tokens[source]:
+			continue
+		data = fetch_facebook_lead(lead.facebook_lead_id, tokens[source]) or {}
+		answers = unmapped_answers(data.get("field_data"), lead.facebook_form_id)
+		if answers:
+			frappe.db.set_value("CRM Lead", lead.name, "abm_form_answers", answers, update_modified=False)
+			filled += 1
+	frappe.db.commit()
+	return {"checked": len(leads), "filled": filled}
 
 
 # Routing
