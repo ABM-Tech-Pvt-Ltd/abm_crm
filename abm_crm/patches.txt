@@ -9,3 +9,4 @@ abm_crm.patches.v1_0.stop_email_leads_when_disabled
 abm_crm.patches.v1_1.backfill_phone_key
 abm_crm.patches.v1_2.migrate_field_visits
 abm_crm.patches.v1_3.add_lead_form_fields_to_side_panel
+abm_crm.patches.v1_4.form_answers_table

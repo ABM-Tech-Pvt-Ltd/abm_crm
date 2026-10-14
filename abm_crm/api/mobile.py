@@ -75,7 +75,6 @@ DEAL_FIELDS = [
 ]
 DETAIL_FIELDS = [
 	"abm_lead_sync_source",
-	"abm_form_answers",
 	"lost_reason",
 	"lost_notes",
 	"territory",
@@ -529,6 +528,10 @@ def get_record(doctype: str, name: str) -> dict:
 	row = record_row(doc)
 	row.update({f: doc.get(f) for f in DETAIL_FIELDS})
 	row.update(lead_info(doc))
+	# lead form questions not mapped to a field (a deal has its own copy, made at conversion)
+	row["form_answers"] = [
+		{"question": r.question, "answer": r.answer} for r in doc.get("abm_form_answer_rows") or []
+	]
 
 	# a deal also shows its lead's history from before conversion, as on the web
 	refs = [(doctype, name)]

@@ -70,8 +70,10 @@ def add_campaign_section():
 	# patches are marked done on a fresh install without running, so run this one here once.
 	# Not on every migrate: users may remove the section from the side panel.
 	from abm_crm.patches.v1_0.add_campaign_section_to_side_panel import execute
+	from abm_crm.patches.v1_4.form_answers_table import add_form_answers_section
 
 	execute()
+	add_form_answers_section()
 
 
 DEFAULT_WHATSAPP_TEMPLATES = [
@@ -206,6 +208,7 @@ def campaign_fields():
 		("abm_adset", "Ad Set", "Data"),
 		("abm_ad", "Ad", "Data"),
 		("abm_platform", "Platform", "Data"),
+		("abm_form_answer_rows", "Form Answers", "Table"),
 		("abm_form_answers", "Other Form Answers", "Small Text"),
 		("abm_campaign_column", None, "Column Break"),
 		("abm_campaign_id", "Campaign ID", "Data"),
@@ -227,9 +230,13 @@ def campaign_fields():
 			field["options"] = "Lead Sync Source"
 		if fieldtype == "Data":
 			field["in_standard_filter"] = fieldname in ("abm_campaign", "abm_platform")
-		if fieldname == "abm_form_answers":
+		if fieldname == "abm_form_answer_rows":
 			# answers to lead form questions that are not mapped to a CRM field (abm_crm.lead_routing)
+			field["options"] = "ABM Lead Form Answer"
+		if fieldname == "abm_form_answers":
+			# replaced by abm_form_answer_rows (patch v1_4); hidden, its old text is kept
 			field["description"] = "Lead form questions that are not mapped to a field, one per line"
+			field["hidden"] = 1
 		result.append(field)
 	return result
 

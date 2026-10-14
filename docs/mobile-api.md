@@ -77,7 +77,8 @@ Same as `list_leads`, returning DealRows.
 `doctype` is `CRM Lead` or `CRM Deal`. Returns:
 ```json
 { "doc": {LeadRow/DealRow fields + "territory","industry","website","job_title","annual_revenue","lost_reason",
-          "abm_adset","abm_ad","abm_platform"},
+          "abm_adset","abm_ad","abm_platform",
+          "form_answers": [{"question","answer"}]},
   "notes": [{"name","title","content","owner","creation"}],
   "tasks": [Task],
   "calls": [Call],
@@ -86,6 +87,11 @@ Same as `list_leads`, returning DealRows.
   "whatsapp": [{"name","message","sent_by","creation"}] }
 ```
 Each list is newest first, with at most 50 items.
+
+`doc.form_answers` is the lead form's questions that are not mapped to a CRM field (budget, location, ...), in form
+order, `[]` when there are none. Several values for one question are joined with ", ". A deal has its own copy, made
+from its lead at conversion. It replaces `abm_form_answers` (a "Question: answer" per line text), which is no longer
+returned.
 
 ### `update_status(doctype, name, status)`
 Returns the updated `doc`.

@@ -17,7 +17,6 @@ CAMPAIGN_SECTION = {
 				"abm_adset",
 				"abm_ad",
 				"abm_platform",
-				"abm_form_answers",
 				"abm_routing_rule",
 			],
 		}

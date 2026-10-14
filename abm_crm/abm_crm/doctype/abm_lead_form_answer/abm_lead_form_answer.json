@@ -1,0 +1,43 @@
+{
+ "actions": [],
+ "creation": "2026-10-14 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": ["question", "answer", "question_key"],
+ "fields": [
+  {
+   "columns": 4,
+   "fieldname": "question",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Question"
+  },
+  {
+   "columns": 6,
+   "fieldname": "answer",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Answer"
+  },
+  {
+   "description": "The question's key on the Facebook lead form",
+   "fieldname": "question_key",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Question Key"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-14 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Abm Crm",
+ "name": "ABM Lead Form Answer",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

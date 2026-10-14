@@ -26,7 +26,6 @@ ATTRIBUTION_FIELDS = (
 	"abm_ad_id",
 	"abm_platform",
 	"abm_lead_sync_source",
-	"abm_form_answers",
 )
 OPEN_STATUS_TYPES = ("Open", "Ongoing")
 FB_PLATFORMS = {"fb": "Facebook", "ig": "Instagram", "msgr": "Messenger", "wa": "WhatsApp"}
@@ -41,7 +40,7 @@ def before_insert_lead(doc, method=None):
 		doc.abm_lead_sync_source = frappe.db.get_value(
 			"Lead Sync Source", {"facebook_lead_form": doc.facebook_form_id}, "name"
 		)
-	if doc.facebook_lead_id and not (doc.get("abm_campaign_id") and doc.get("abm_form_answers")):
+	if doc.facebook_lead_id and not (doc.get("abm_campaign_id") and doc.get("abm_form_answer_rows")):
 		set_facebook_attribution(doc)
 	if doc.facebook_lead_id and not doc.get("abm_platform"):
 		doc.abm_platform = "Facebook"
@@ -63,6 +62,14 @@ def before_insert_deal(doc, method=None):
 	for field, value in (values or {}).items():
 		if value and not doc.get(field):
 			doc.set(field, value)
+	if not doc.get("abm_form_answer_rows"):
+		for row in frappe.get_all(
+			"ABM Lead Form Answer",
+			filters={"parenttype": "CRM Lead", "parent": doc.lead, "parentfield": "abm_form_answer_rows"},
+			fields=["question", "answer", "question_key"],
+			order_by="idx",
+		):
+			doc.append("abm_form_answer_rows", row)
 
 
 # Facebook attribution
@@ -79,8 +86,9 @@ def set_facebook_attribution(doc):
 	if not data:
 		return
 
-	if not doc.get("abm_form_answers"):
-		doc.abm_form_answers = unmapped_answers(data.get("field_data"), doc.facebook_form_id)
+	if not doc.get("abm_form_answer_rows"):
+		for row in unmapped_answers(data.get("field_data"), doc.facebook_form_id):
+			doc.append("abm_form_answer_rows", row)
 	if doc.get("abm_campaign_id"):
 		return
 	doc.abm_campaign_id = data.get("campaign_id")
@@ -116,14 +124,15 @@ def fetch_facebook_lead(lead_id: str, token: str) -> dict | None:
 	return None
 
 
-def unmapped_answers(field_data: list | None, form_id: str | None) -> str | None:
-	"""Answers to form questions that are not mapped to a CRM field, as "Question: answer" lines.
+def unmapped_answers(field_data: list | None, form_id: str | None) -> list[dict]:
+	"""Answers to form questions that are not mapped to a CRM field, as Form Answers rows:
+	[{"question", "answer", "question_key"}]. Several values are joined with ", ".
 
 	The lead form's extra questions (budget, preferred location, ...) are kept on the lead this way
 	instead of being dropped by the sync.
 	"""
 	if not field_data:
-		return None
+		return []
 	questions = {
 		q.key: q
 		for q in frappe.get_all(
@@ -132,7 +141,7 @@ def unmapped_answers(field_data: list | None, form_id: str | None) -> str | None
 			fields=["key", "label", "mapped_to_crm_field"],
 		)
 	}
-	lines = []
+	rows = []
 	for item in field_data:
 		values = [str(v) for v in item.get("values") or [] if str(v).strip()]
 		key = item.get("name")
@@ -140,24 +149,89 @@ def unmapped_answers(field_data: list | None, form_id: str | None) -> str | None
 		if not values or (question and question.mapped_to_crm_field):
 			continue
 		label = (question and question.label) or (key or "").replace("_", " ").strip().capitalize()
-		lines.append(f"{label}: {', '.join(values)}")
-	return "\n".join(lines) or None
+		rows.append({"question": label, "answer": ", ".join(values), "question_key": key})
+	return rows
+
+
+def answers_from_text(text: str | None) -> list[dict]:
+	"""Form Answers rows from the old "Other Form Answers" text: one "Question: answer" per line.
+
+	A line without ": " continues the answer above it (or, first, is an answer with no question).
+	"""
+	rows = []
+	for line in (text or "").splitlines():
+		if not line.strip():
+			continue
+		question, sep, answer = line.partition(": ")
+		if not sep:
+			if rows:
+				rows[-1]["answer"] += "\n" + line.strip()
+				continue
+			question, answer = "", line
+		rows.append({"question": question.strip(), "answer": answer.strip(), "question_key": None})
+	return rows
+
+
+def add_answer_rows(doctype: str, name: str, rows: list[dict]) -> None:
+	"""Append Form Answers rows to a saved lead or deal without saving the document (no hooks, no modified)."""
+	last = frappe.get_all(
+		"ABM Lead Form Answer",
+		filters={"parenttype": doctype, "parent": name, "parentfield": "abm_form_answer_rows"},
+		fields=[{"MAX": "idx", "as": "idx"}],
+		order_by=None,
+	)
+	start = cint(last[0].idx) if last else 0
+	for i, row in enumerate(rows, start=start + 1):
+		child = frappe.new_doc("ABM Lead Form Answer")
+		child.update(row)
+		child.update({"parenttype": doctype, "parent": name, "parentfield": "abm_form_answer_rows", "idx": i})
+		child.db_insert()
+
+
+def migrate_text_answers() -> int:
+	"""Turn the old "Other Form Answers" text into Form Answers rows, on leads and deals that have text
+	but no rows. The text is kept. Returns how many records got rows."""
+	migrated = 0
+	for doctype in ("CRM Lead", "CRM Deal"):
+		if not frappe.db.has_column(doctype, "abm_form_answers"):
+			continue
+		has_rows = set(
+			frappe.get_all(
+				"ABM Lead Form Answer",
+				filters={"parenttype": doctype, "parentfield": "abm_form_answer_rows"},
+				pluck="parent",
+				distinct=True,
+			)
+		)
+		for record in frappe.get_all(
+			doctype, filters={"abm_form_answers": ["is", "set"]}, fields=["name", "abm_form_answers"]
+		):
+			if record.name in has_rows:
+				continue
+			rows = answers_from_text(record.abm_form_answers)
+			if rows:
+				add_answer_rows(doctype, record.name, rows)
+				migrated += 1
+	return migrated
 
 
 @frappe.whitelist()
 def backfill_form_answers(limit: int = 500) -> dict:
-	"""Fill "Other Form Answers" on Facebook leads synced before it existed, from Facebook. Managers only.
+	"""Fill Form Answers on Facebook leads synced before it existed, from Facebook. Managers only.
 
 	Safe to run again: leads that already have answers are skipped. Run it more than once when there
 	are more than `limit` leads.
 	"""
 	frappe.only_for(("System Manager", "Sales Manager"))
-	leads = frappe.get_all(
-		"CRM Lead",
-		filters={"facebook_lead_id": ["is", "set"], "abm_form_answers": ["is", "not set"]},
-		fields=["name", "facebook_lead_id", "facebook_form_id", "abm_lead_sync_source"],
-		order_by="creation desc",
-		limit=cint(limit) or 500,
+	leads = frappe.db.sql(
+		"""select name, facebook_lead_id, facebook_form_id, abm_lead_sync_source from `tabCRM Lead` lead
+		where ifnull(facebook_lead_id, '') != '' and not exists (
+			select 1 from `tabABM Lead Form Answer` answer
+			where answer.parenttype = 'CRM Lead' and answer.parentfield = 'abm_form_answer_rows'
+			and answer.parent = lead.name)
+		order by creation desc limit %s""",
+		cint(limit) or 500,
+		as_dict=True,
 	)
 	tokens = {}
 	filled = 0
@@ -170,9 +244,9 @@ def backfill_form_answers(limit: int = 500) -> dict:
 		if not tokens[source]:
 			continue
 		data = fetch_facebook_lead(lead.facebook_lead_id, tokens[source]) or {}
-		answers = unmapped_answers(data.get("field_data"), lead.facebook_form_id)
-		if answers:
-			frappe.db.set_value("CRM Lead", lead.name, "abm_form_answers", answers, update_modified=False)
+		rows = unmapped_answers(data.get("field_data"), lead.facebook_form_id)
+		if rows:
+			add_answer_rows("CRM Lead", lead.name, rows)
 			filled += 1
 	frappe.db.commit()
 	return {"checked": len(leads), "filled": filled}
