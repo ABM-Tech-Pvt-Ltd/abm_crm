@@ -205,6 +205,18 @@ class TestMobileAPI(IntegrationTestCase):
 			self.assertEqual(mobile.upload_recording(first)["recording_url"], url)
 		self.assertFalse(frappe.db.get_value("CRM Call Log", second, "recording_url"))
 
+	def test_pending_recordings_lists_this_phones_calls_without_one(self):
+		frappe.set_user(REP)
+		with_rec, without = (r["call_log"] for r in mobile.sync_calls([phone_call("33"), phone_call("34", duration=40)], "dev-p"))
+		frappe.db.set_value("CRM Call Log", with_rec, "recording_url", "/private/files/x.m4a")
+		pending = mobile.pending_recordings("dev-p")
+		self.assertEqual([p["call_log"] for p in pending], [without])
+		self.assertEqual(pending[0]["duration"], 40)
+		# start round-trips to the phone's epoch milliseconds
+		self.assertEqual(mobile.from_epoch_ms(pending[0]["start"]), frappe.db.get_value("CRM Call Log", without, "start_time"))
+		# another phone's calls are not listed
+		self.assertEqual(mobile.pending_recordings("dev-other"), [])
+
 	def test_set_call_outcome_creates_note_and_task(self):
 		frappe.set_user(REP)
 		log = mobile.sync_calls([phone_call("40")], "dev-e")[0]["call_log"]

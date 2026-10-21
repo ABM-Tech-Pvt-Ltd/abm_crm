@@ -23,6 +23,7 @@ from frappe.utils import (
 	escape_html,
 	flt,
 	get_datetime,
+	get_system_timezone,
 	getdate,
 	now_datetime,
 	nowdate,
@@ -968,6 +969,51 @@ def sync_result(result: dict, log, ctx) -> dict:
 		result["reference_title"] = record_title(log.reference_doctype, log.reference_docname)
 	result["upload_recording"] = bool(ctx.upload and flt(log.duration) > 0 and not log.recording_url)
 	return result
+
+
+@frappe.whitelist()
+def pending_recordings(device_id: str, days: int = 3) -> list[dict]:
+	"""Calls this phone logged in the last `days` days that still have no recording.
+
+	The app re-queues these on every sync, so a recording is never lost because the app dropped it
+	from its own queue (reinstall, cleared data, too many failed tries).
+	"""
+	if not recordings_enabled():
+		return []
+	device = clean_id(device_id)
+	if not device:
+		frappe.throw(_("device_id is required"))
+	logs = frappe.get_all(
+		"CRM Call Log",
+		filters={
+			"name": ["like", f"abm-{device}-%"],
+			"owner": frappe.session.user,
+			"duration": [">", 0],
+			"recording_url": ["is", "not set"],
+			"start_time": [">=", add_days(now_datetime(), -min(max(cint(days), 1), 7))],
+		},
+		fields=["name", "type", "from", "to", "start_time", "duration"],
+		order_by="start_time desc",
+		limit=200,
+	)
+	return [
+		{
+			"call_log": log.name,
+			"number": log.get("from") if log.type == "Incoming" else log.get("to"),
+			"start": to_epoch_ms(log.start_time),
+			"duration": cint(log.duration),
+		}
+		for log in logs
+		if log.start_time
+	]
+
+
+def to_epoch_ms(value) -> int:
+	"""A site-time-zone datetime (as stored) as Unix milliseconds."""
+	from zoneinfo import ZoneInfo
+
+	local = get_datetime(value).replace(tzinfo=ZoneInfo(get_system_timezone()))
+	return int(local.timestamp() * 1000)
 
 
 @frappe.whitelist(methods=["POST"])
